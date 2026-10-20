@@ -225,3 +225,28 @@ Stage Summary:
 - از این به بعد: فقط تگ جدید بزن (مثلاً v2.4.0) → بیلد + Release خودکار
 - هر سه کامیت جدید: 5e6dbcb (workflow)، تگ v2.3.0، 6168190 (page) — همه پوش شده
 - توکن باید revoke شود
+
+---
+Task ID: 11
+Agent: main (Z.ai Code)
+Task: درخواست کاربر پس از تست موفق v2.3: حذف زیرنویس + دو اسلایدر ولوم مستقل + ریشه‌یابی «لوپ ۵ ثانیه‌ای» (v2.4)
+
+Work Log:
+- کد کامل خط لوله صدا خوانده شد (AudioPlayerEngine/LiveDubService/AudioCaptureEngine/PcmResampler): هیچ مکانیزم بازپخش در کلاینت نیست — صف یک‌بار مصرف، AudioTrack MODE_STREAM، بافر rotation تخلیه می‌شود → لوپ کلاینت‌ساید منتفی
+- تشخیص لوپ: ویدیوی تست کاربر ریلز/شورت با پخش خودکار تکراری است (اسکرین‌شات قبلی = ریلز اینستاگرام) → ورودی تکراری = دوبله تکراری؛ خط راهنمای شماره ۶ در اپ اضافه شد (تست با ویدیوی بلند)
+- AppScreen.kt: بخش «زیرنویس زنده» کامل حذف شد + دو اسلایدر مستقل با آیکون و رنگ متمایز:
+  • «صدای دوبله» (0..100٪) — اکنون زنده: Slider → activity.setDubVolumeLive → سرویس → AudioTrack.setVolume (قبلاً فقط برای اجرای بعدی ذخیره می‌شد!)
+  • «صدای اصلی (ولوم دستگاه)» (0..max با steps) → activity.setMediaVolumeLive → سرویس → AudioManager.setStreamVolume(STREAM_MUSIC) — همان ولومی که اپ مبدأ پخش می‌کند
+  • هینت کانال مکالمه به‌روز شد: «با روشن‌کردنش دو اسلایدر کاملاً مستقل می‌شوند» + فوتر v2.4
+- LiveDubService: ACTION_SET_DUB_VOLUME / ACTION_SET_MEDIA_VOLUME + setMediaVolume + ذخیره pref
+- MainActivity: setDubVolumeLive / mediaVolume / setMediaVolumeLive + import AudioManager
+- versionCode 4 / versionName 2.4.0؛ README: دو سکشن جدید (کنترل زنده ولوم‌ها + «لوپ ریلز باگ نیست»)
+- زیپ بازسازی شد (157KB / 52 فایل) — تأیید محتوا: setMediaVolumeLive ✓ بدون زیرنویس ✓
+- page.tsx: همه ارجاع‌ها v2.4 + دکمه مستقیم به releases/latest (دیگر به نسخه hardcode نیست) + آیتم ویژگی جدید در کارت اندروید؛ lint 0 خطا؛ کامیت 3a1f95c
+- Agent-Browser: تب اندروید → باکس v2.4.0 و «دو اسلایدر زنده» render ✓ بدون خطای کنسول
+
+Stage Summary:
+- ⛔ پوش هر دو ریپو بلاک شد: توکن ghp_xhJg... حالا 401 (کاربر revoke کرده)
+- آماده محلی: اندروید = کامیت 795a9ee + تگ v2.4.0 (پوش تگ → بیلد + Release خودکار با workflow جدید)؛ وب = 3a1f95c
+- برای انتشار فقط نیاز به توکن جدید است؛ دستورات پوش آماده است
+- نکته کلیدی برای کاربر: اسلایدر دوبله قبلاً زنده نبود (فقط اجرای بعد) — الان زنده است؛ لوپ = پخش تکراری ریلز

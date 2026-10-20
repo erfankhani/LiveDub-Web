@@ -531,6 +531,39 @@ export default function Home() {
               <TabsContent value="android" className="mt-6">
                 <Card className="bg-white/[0.03] border-white/8">
                   <CardContent className="p-6 sm:p-8">
+                    {/* ⭐ مسیر سریع: APK آماده از GitHub Releases (بدون Android Studio) */}
+                    <div className="mb-6 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-5">
+                      <div className="flex items-start gap-3.5">
+                        <span className="shrink-0 w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 grid place-items-center">
+                          <Download className="w-5 h-5 text-emerald-300" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[14px] font-bold text-emerald-200">
+                            ⚡ سریع‌ترین راه — APK آماده را از GitHub Releases دانلود کنید
+                          </p>
+                          <p className="text-[12.5px] text-emerald-100/60 leading-6 mt-1">
+                            بدون Android Studio! فایل <b dir="ltr">LiveDub-*-debug.apk</b> را نصب کنید.
+                            نسخه v2.3.0 فیکس ریشه‌ای «ارسال می‌شود ولی دریافت نمی‌شود» را دارد و لینک Releases هرگز منقضی نمی‌شود.
+                          </p>
+                          <div className="flex flex-wrap gap-2.5 mt-3.5">
+                            <a href="https://github.com/erfankhani/LiveDub-Android/releases/latest" target="_blank" rel="noreferrer">
+                              <Button size="sm" className="h-9 bg-emerald-500 hover:bg-emerald-400 text-[#052018] font-bold">
+                                <Download className="w-4 h-4 me-1.5" /> دانلود APK از Releases
+                              </Button>
+                            </a>
+                            <a href="https://github.com/erfankhani/LiveDub-Android/releases/download/v2.3.0/LiveDub-v2.3.0-debug.apk" target="_blank" rel="noreferrer">
+                              <Button size="sm" variant="outline" className="h-9 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10">
+                                دانلود مستقیم v2.3.0
+                              </Button>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <Separator className="mb-6 bg-white/8" />
+                    <p className="text-[12px] text-emerald-100/45 mb-4">
+                      🛠 راه دوم (توسعه‌دهندگان): بیلد محلی با Android Studio از سورس:
+                    </p>
                     <ol className="space-y-4">
                       {[
                         <>Android Studio (نسخه Koala یا جدیدتر) و JDK 17 نصب کنید.</>,

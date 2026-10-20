@@ -12,8 +12,8 @@ android {
         applicationId = "com.livedub.app"
         minSdk = 29          // AudioPlaybackCapture از API 29 به بالا
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "2.3.0"
     }
 
     buildTypes {

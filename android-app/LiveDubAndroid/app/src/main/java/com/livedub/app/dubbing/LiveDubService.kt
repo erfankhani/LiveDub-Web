@@ -51,6 +51,7 @@ class LiveDubService : Service() {
         const val EXTRA_CAPTURE_CHUNKS = "captureChunks" // ⭐ دیاگنوستیک: چانک‌های خوانده‌شده ضبط
         const val EXTRA_SETUP_OK = "setupOk"        // ⭐ دیاگنوستیک: setupComplete دریافت شد؟
         const val EXTRA_SOCKET_OPEN = "socketOpen"  // ⭐ دیاگنوستیک: سوکت باز است؟
+        const val EXTRA_MSG_IN = "msgIn"            // ⭐ دیاگنوستیک: تعداد پیام‌های دریافتی از سرور
 
         private const val CHANNEL_ID = "livedub_service"
         private const val NOTIF_ID = 1001
@@ -420,6 +421,7 @@ class LiveDubService : Service() {
         i.putExtra(EXTRA_CAPTURE_CHUNKS, (capture?.chunksRead ?: 0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
         i.putExtra(EXTRA_SETUP_OK, c?.isSetupComplete ?: false)
         i.putExtra(EXTRA_SOCKET_OPEN, c?.isOpen ?: false)
+        i.putExtra(EXTRA_MSG_IN, (c?.msgInCount ?: 0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
         sendBroadcast(i)
     }
 

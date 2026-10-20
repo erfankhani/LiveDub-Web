@@ -14,6 +14,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -25,6 +26,16 @@ import kotlin.math.pow
  * کلاینت WebSocket برای Gemini Live Translate
  *
  * ─────────────────────────────────────────────────────────────
+ *  ⭐⭐⭐ فیکس ریشه‌ای «ارسال می‌شود ولی هیچی دریافت نمی‌شود» (v2.3):
+ *  سرور Gemini Live پاسخ‌هایش (setupComplete / serverContent / خطاها) را
+ *  به‌صورت «فریم باینری» می‌فرستد — نه متن! (SDK رسمی گوگل @google/genai
+ *  هم Blob/ArrayBuffer را هندل می‌کند؛ اکستنشن کروم هم Blob را هندل می‌کرد)
+ *  در OkHttp اگر فقط onMessage(String) را override کنیم، فریم‌های باینری
+ *  با پیاده‌سازی پیش‌فرضِ خالیِ onMessage(ByteString) بی‌صدا دور ریخته
+ *  می‌شوند → سوکت باز می‌ماند، صدا ارسال می‌شود، ولی هیچ‌وقت setupComplete
+ *  و صدا و خطا دریافت نمی‌شود — دقیقاً همان باگ!
+ *  اکنون onMessage(ByteString) هم override شده و به UTF-8 تبدیل می‌شود.
+ *
  *  ⭐⭐ فیکس «وصل است ولی صفر بایت ارسال می‌شود» (v2.2):
  *  اکستنشن کرومِ اصلی (که روی همین پروتکل کار می‌کند) صدا را
  *  بلافاصله بعد از باز شدن سوکت می‌فرستد و منتظر setupComplete
@@ -91,6 +102,7 @@ class GeminiLiveClient(
     @Volatile private var reconnects = 0
     @Volatile var sentBytes = 0L      // مجموع بایت صدای ارسالی به سرور (دیاگنوستیک)
     @Volatile var recvAudioBytes = 0L // مجموع بایت صدای دوبله دریافتی (دیاگنوستیک)
+    @Volatile var msgInCount = 0L     // ⭐ تعداد کل پیام‌های دریافتی از سرور (دیاگنوستیک — باید >0 باشد!)
 
     /** ⭐ آیا سرور setupComplete داده؟ (برای نمایش مرحله در UI) */
     @Volatile var isSetupComplete = false
@@ -197,7 +209,13 @@ class GeminiLiveClient(
             }
         }
 
+        /** ⭐⭐⭐ فریم باینری — سرور Gemini پاسخ JSON را باینری می‌فرستد؛ بدون این، همه‌چیز بی‌صدا دور ریخته می‌شد */
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            onMessage(webSocket, bytes.utf8())
+        }
+
         override fun onMessage(webSocket: WebSocket, text: String) {
+            msgInCount++ // هر پیامی از هر نوعی که برسد شمرده می‌شود (دیاگنوستیک)
             val msg = try { JSONObject(text) } catch (_: Exception) { return }
 
             // ⭐⭐ خطای سرور (کلید نامعتبر / مدل بدون دسترسی / کوتا) — دیگر مخفی نمی‌ماند

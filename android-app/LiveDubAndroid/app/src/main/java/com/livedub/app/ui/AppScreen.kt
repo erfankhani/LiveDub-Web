@@ -347,7 +347,8 @@ fun AppScreen(
                         DiagStrip(
                             socketOpen = status.socketOpen,
                             setupOk = status.setupOk,
-                            capturing = status.captureChunks > 0
+                            capturing = status.captureChunks > 0,
+                            msgIn = status.msgIn
                         )
 
                         // ⭐ متر زنده صدا ورودی — اگر صفر بماند یعنی کپچر صدا کار نمی‌کند
@@ -428,7 +429,7 @@ fun AppScreen(
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "LiveDub v2.2 · دوبله زنده با Gemini Live Translate",
+                "LiveDub v2.3 · دوبله زنده با Gemini Live Translate",
                 fontSize = 10.sp, color = TextMuted,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
@@ -459,7 +460,7 @@ private fun Header(running: Boolean, state: String) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text("LiveDub", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFE8EFEC))
-            Text("دوبله زنده با Gemini · v2.2", fontSize = 11.sp, color = TextMuted)
+            Text("دوبله زنده با Gemini · v2.3", fontSize = 11.sp, color = TextMuted)
         }
         Surface(
             shape = RoundedCornerShape(99.dp),
@@ -496,20 +497,53 @@ private fun Header(running: Boolean, state: String) {
 }
 
 @Composable
-private fun DiagStrip(socketOpen: Boolean, setupOk: Boolean, capturing: Boolean) {
+private fun DiagStrip(socketOpen: Boolean, setupOk: Boolean, capturing: Boolean, msgIn: Int) {
     Surface(
         shape = RoundedCornerShape(11.dp),
         color = Color(0xFF0E1413),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DiagChip("سوکت", socketOpen, "وصل", "قطع")
-            DiagChip("تأیید سرور", setupOk, "دریافت شد", "در انتظار…")
-            DiagChip("ضبط صدا", capturing, "فعال", "بدون داده")
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DiagChip("سوکت", socketOpen, "وصل", "قطع")
+                DiagChip("تأیید سرور", setupOk, "دریافت شد", "در انتظار…")
+            }
+            Spacer(Modifier.height(7.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DiagChip("ضبط صدا", capturing, "فعال", "بدون داده")
+                DiagChipMsg(msgIn)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagChipMsg(msgIn: Int) {
+    val ok = msgIn > 0
+    val color = if (ok) Emerald else Danger
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .background(color, CircleShape)
+        )
+        Spacer(Modifier.width(5.dp))
+        Column {
+            Text("پیام سرور", fontSize = 9.sp, color = TextMuted)
+            Text(
+                if (ok) "✓ " + faNum(msgIn) + " پیام" else "✕ صفر",
+                fontSize = 10.sp,
+                color = color,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }

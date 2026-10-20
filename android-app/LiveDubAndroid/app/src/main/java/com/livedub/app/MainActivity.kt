@@ -46,7 +46,8 @@ class MainActivity : ComponentActivity() {
         val warn: String = "none",
         val captureChunks: Int = 0,
         val setupOk: Boolean = false,
-        val socketOpen: Boolean = false
+        val socketOpen: Boolean = false,
+        val msgIn: Int = 0
     )
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -66,7 +67,8 @@ class MainActivity : ComponentActivity() {
                 warn = intent.getStringExtra(LiveDubService.EXTRA_WARN) ?: "none",
                 captureChunks = intent.getIntExtra(LiveDubService.EXTRA_CAPTURE_CHUNKS, 0),
                 setupOk = intent.getBooleanExtra(LiveDubService.EXTRA_SETUP_OK, false),
-                socketOpen = intent.getBooleanExtra(LiveDubService.EXTRA_SOCKET_OPEN, false)
+                socketOpen = intent.getBooleanExtra(LiveDubService.EXTRA_SOCKET_OPEN, false),
+                msgIn = intent.getIntExtra(LiveDubService.EXTRA_MSG_IN, 0)
             )
             onStatus?.invoke(snap)
         }

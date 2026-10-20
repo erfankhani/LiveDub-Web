@@ -1,0 +1,1055 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * LiveDubTester — پیش‌نمایش اجرایی موتور دوبله (همان پروتکل اپ اندروید)
+     5→ *
+     6→ * این کامپوننت دقیقاً همان کاری را می‌کند که GeminiLiveClient.kt + سرویس اندروید انجام می‌دهند:
+     7→ *  ضبط صدا → PCM 16kHz → WebSocket به Gemini Live Translate → پخش صدای دوبله 24kHz
+     8→ *  + Session Rotation هر ~۱۳.۵ دقیقه + Reconnect با Backoff + زیرنویس زنده + عیب‌یابی کامل
+     9→ *
+    10→ * برای تست: کلید Gemini API (aistudio.google.com) را وارد کنید، «شروع دوبله» را بزنید و
+    11→ * یک تب (مثلاً یوتیوب) را همراه با گزینه «اشتراک صدا» انتخاب کنید.
+    12→ * کلید API فقط در مرورگر شما ذخیره می‌شود.
+    13→ */
+    14→
+    15→import { useCallback, useEffect, useRef, useState } from "react";
+    16→import {
+    17→  Activity,
+    18→  ArrowDownToLine,
+    19→  ArrowUpFromLine,
+    20→  BadgeCheck,
+    21→  CircleStop,
+    22→  Copy,
+    23→  Eye,
+    24→  EyeOff,
+    25→  Info,
+    26→  KeyRound,
+    27→  Mic,
+    28→  RefreshCw,
+    29→  ScrollText,
+    30→  Sparkles,
+    31→} from "lucide-react";
+    32→import { Badge } from "@/components/ui/badge";
+    33→import { Button } from "@/components/ui/button";
+    34→import { Input } from "@/components/ui/input";
+    35→
+    36→// ─────────────── ثابت‌های پروتکل (یکسان با اپ اندروید) ───────────────
+    37→const WS_BASE =
+    38→  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+    39→const MODEL = "models/gemini-3.5-live-translate-preview";
+    40→const SESSION_ROTATE_MS = 13.5 * 60 * 1000; // تمدید قبل از سقف ~۱۵ دقیقه سرور
+    41→const RECONNECT_BASE_MS = 1200;
+    42→const RECONNECT_MAX_MS = 10000;
+    43→const MAX_PENDING_CHUNKS = 240; // ~۱۲ ثانیه بافر حین تعویض سشن
+    44→const CONNECT_TIMEOUT_MS = 12000;
+    45→
+    46→type Phase = "idle" | "starting" | "connecting" | "live" | "rotating" | "reconnecting" | "error";
+    47→
+    48→type Stats = {
+    49→  phase: Phase;
+    50→  message: string;
+    51→  rotations: number;
+    52→  reconnects: number;
+    53→  sentKb: number;
+    54→  recvKb: number;
+    55→  inputLevel: number;
+    56→  outputLevel: number;
+    57→  serverError: string;
+    58→};
+    59→
+    60→type LogLine = { time: string; kind: "info" | "ok" | "warn" | "error"; msg: string };
+    61→type SubLine = { dir: "in" | "out"; text: string };
+    62→
+    63→const INITIAL_STATS: Stats = {
+    64→  phase: "idle",
+    65→  message: "",
+    66→  rotations: 0,
+    67→  reconnects: 0,
+    68→  sentKb: 0,
+    69→  recvKb: 0,
+    70→  inputLevel: 0,
+    71→  outputLevel: 0,
+    72→  serverError: "",
+    73→};
+    74→
+    75→const LANGS: Array<[string, string]> = [
+    76→  ["fa", "فارسی"],
+    77→  ["en", "انگلیسی"],
+    78→  ["ar", "عربی"],
+    79→  ["tr", "ترکی"],
+    80→  ["es", "اسپانیایی"],
+    81→  ["fr", "فرانسوی"],
+    82→  ["de", "آلمانی"],
+    83→  ["ru", "روسی"],
+    84→  ["hi", "هندی"],
+    85→  ["ur", "اردو"],
+    86→  ["zh-Hans", "چینی"],
+    87→  ["ja", "ژاپنی"],
+    88→  ["ko", "کره‌ای"],
+    89→];
+    90→
+    91→function faNum(n: number | string): string {
+    92→  return String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)]);
+    93→}
+    94→
+    95→function bytesToBase64(bytes: Uint8Array): string {
+    96→  let binary = "";
+    97→  const CHUNK = 0x8000;
+    98→  for (let i = 0; i < bytes.length; i += CHUNK) {
+    99→    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+   100→  }
+   101→  return btoa(binary);
+   102→}
+   103→
+   104→// ─────────────── موتور دوبله (پورت offscreen.js / GeminiLiveClient.kt) ───────────────
+   105→
+   106→type EngineCallbacks = {
+   107→  onStats: (patch: Partial<Stats>) => void;
+   108→  onLog: (kind: LogLine["kind"], msg: string) => void;
+   109→  onTranscript: (dir: "in" | "out", text: string) => void;
+   110→  onStopped: (reason: string) => void;
+   111→};
+   112→
+   113→class DubEngine {
+   114→  private apiKey: string;
+   115→  private targetLang: string;
+   116→  private source: "tab" | "mic";
+   117→  private cbs: EngineCallbacks;
+   118→
+   119→  private running = false;
+   120→  private stream: MediaStream | null = null;
+   121→  private captureCtx: AudioContext | null = null;
+   122→  private workletNode: AudioWorkletNode | null = null;
+   123→  private playbackCtx: AudioContext | null = null;
+   124→  private masterGain: GainNode | null = null;
+   125→  private analyser: AnalyserNode | null = null;
+   126→  private analyserTimer: ReturnType<typeof setInterval> | null = null;
+   127→  private nextPlayTime = 0;
+   128→
+   129→  private activeSocket: WebSocket | null = null;
+   130→  private connectingSocket: WebSocket | null = null;
+   131→  private rotationTimer: ReturnType<typeof setTimeout> | null = null;
+   132→  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+   133→  private reconnectAttempts = 0;
+   134→  private pendingChunks: Float32Array[] = [];
+   135→
+   136→  private rotations = 0;
+   137→  private reconnects = 0;
+   138→  private sentBytes = 0;
+   139→  private recvAudioBytes = 0;
+   140→  private serverError = "";
+   141→  private lastLevelPush = 0;
+   142→
+   143→  constructor(apiKey: string, targetLang: string, source: "tab" | "mic", cbs: EngineCallbacks) {
+   144→    this.apiKey = apiKey;
+   145→    this.targetLang = targetLang;
+   146→    this.source = source;
+   147→    this.cbs = cbs;
+   148→  }
+   149→
+   150→  // ── شروع ──
+   151→  async start() {
+   152→    if (this.running) return;
+   153→    this.running = true;
+   154→    this.cbs.onStats({ phase: "starting", message: "در حال گرفتن صدای ورودی…" });
+   155→
+   156→    try {
+   157→      // ۱) گرفتن صدا
+   158→      if (this.source === "tab") {
+   159→        this.stream = await navigator.mediaDevices.getDisplayMedia({
+   160→          video: true, // برای اشتراک تب لازم است؛ فقط از ویدیو استفاده نمی‌کنیم
+   161→          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+   162→        });
+   163→        const hasAudio = this.stream.getAudioTracks().length > 0;
+   164→        if (!hasAudio) {
+   165→          throw new Error(
+   166→            "هیچ صدایی در اشتراک نبود! هنگام انتخاب تب، حتماً گزینه «اشتراک صدا / Share tab audio» را فعال کنید."
+   167→          );
+   168→        }
+   169→        // اگر کاربر از نوار کروم «توقف اشتراک» را بزند
+   170→        this.stream.getVideoTracks().forEach((vt) =>
+   171→          vt.addEventListener("ended", () => {
+   172→            this.stop();
+   173→            this.cbs.onStopped("اشتراک صدا از سمت مرورگر متوقف شد");
+   174→          })
+   175→        );
+   176→        this.cbs.onLog("ok", "صدای تب گرفته شد ✓");
+   177→      } else {
+   178→        this.stream = await navigator.mediaDevices.getUserMedia({
+   179→          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+   180→        });
+   181→        this.cbs.onLog("ok", "میکروفون فعال شد ✓");
+   182→      }
+   183→
+   184→      // ۲) کانتکست پخش 24kHz برای صدای دوبله
+   185→      this.playbackCtx = new AudioContext({ sampleRate: 24000, latencyHint: "interactive" });
+   186→      if (this.playbackCtx.state === "suspended") await this.playbackCtx.resume();
+   187→      this.masterGain = this.playbackCtx.createGain();
+   188→      this.masterGain.connect(this.playbackCtx.destination);
+   189→      this.analyser = this.playbackCtx.createAnalyser();
+   190→      this.analyser.fftSize = 512;
+   191→      this.masterGain.connect(this.analyser);
+   192→      this.nextPlayTime = this.playbackCtx.currentTime;
+   193→      this.startOutputMeter();
+   194→
+   195→      // ۳) کانتکست ضبط 16kHz + Worklet
+   196→      this.captureCtx = new AudioContext({ sampleRate: 16000, latencyHint: "interactive" });
+   197→      if (this.captureCtx.state === "suspended") await this.captureCtx.resume();
+   198→      await this.captureCtx.audioWorklet.addModule("/livedub-pcm-processor.js");
+   199→
+   200→      const srcNode = this.captureCtx.createMediaStreamSource(this.stream);
+   201→      this.workletNode = new AudioWorkletNode(this.captureCtx, "livedub-pcm");
+   202→      this.workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
+   203→        if (!this.running) return;
+   204→        this.handleAudioChunk(e.data);
+   205→      };
+   206→      srcNode.connect(this.workletNode);
+   207→      const silent = this.captureCtx.createGain();
+   208→      silent.gain.value = 0;
+   209→      this.workletNode.connect(silent);
+   210→      silent.connect(this.captureCtx.destination);
+   211→
+   212→      // ۴) اتصال اول
+   213→      this.cbs.onStats({ phase: "connecting", message: "اتصال به Gemini…" });
+   214→      await this.openSocket("initial");
+   215→
+   216→      this.cbs.onStats({ phase: "live", message: "دوبله فعال ✅" });
+   217→      this.cbs.onLog("ok", "موتور دوبله شروع شد — محتوا را در همان تب پخش کنید");
+   218→      this.scheduleRotation();
+   219→    } catch (err) {
+   220→      const msg = err instanceof Error ? err.message : String(err);
+   221→      this.cbs.onLog("error", msg);
+   222→      this.cbs.onStats({ phase: "error", message: msg, serverError: msg });
+   223→      this.stop();
+   224→    }
+   225→  }
+   226→
+   227→  // ── توقف ──
+   228→  stop() {
+   229→    if (!this.running) return;
+   230→    this.running = false;
+   231→    clearTimeout(this.rotationTimer);
+   232→    clearTimeout(this.reconnectTimer);
+   233→    if (this.analyserTimer) clearInterval(this.analyserTimer);
+   234→    this.analyserTimer = null;
+   235→
+   236→    if (this.activeSocket) {
+   237→      try {
+   238→        this.activeSocket.onmessage = null;
+   239→        this.activeSocket.onclose = null;
+   240→        this.activeSocket.onerror = null;
+   241→        this.activeSocket.close();
+   242→      } catch {
+   243→        /* ignore */
+   244→      }
+   245→      this.activeSocket = null;
+   246→    }
+   247→    if (this.connectingSocket) {
+   248→      try {
+   249→        this.connectingSocket.onclose = null;
+   250→        this.connectingSocket.close();
+   251→      } catch {
+   252→        /* ignore */
+   253→      }
+   254→      this.connectingSocket = null;
+   255→    }
+   256→    this.stream?.getTracks().forEach((t) => t.stop());
+   257→    this.stream = null;
+   258→    this.workletNode = null;
+   259→    try {
+   260→      this.captureCtx?.close();
+   261→    } catch {
+   262→      /* ignore */
+   263→    }
+   264→    this.captureCtx = null;
+   265→    try {
+   266→      this.playbackCtx?.close();
+   267→    } catch {
+   268→      /* ignore */
+   269→    }
+   270→    this.playbackCtx = null;
+   271→    this.masterGain = null;
+   272→    this.analyser = null;
+   273→    this.pendingChunks = [];
+   274→    this.cbs.onStats({
+   275→      phase: "idle",
+   276→      message: "",
+   277→      inputLevel: 0,
+   278→      outputLevel: 0,
+   279→    });
+   280→    this.cbs.onLog("info", "دوبله متوقف شد");
+   281→  }
+   282→
+   283→  /** تمدید دستی سشن (برای تست Rotation بدون انتظار ۱۳.۵ دقیقه) */
+   284→  rotateNow() {
+   285→    if (!this.running) return;
+   286→    if (this.activeSocket && this.activeSocket.readyState === WebSocket.OPEN && !this.connectingSocket) {
+   287→      this.cbs.onLog("info", "تمدید دستی سشن (Session Rotation)…");
+   288→      this.cbs.onStats({ phase: "rotating", message: "تمدید سشن…" });
+   289→      this.openSocket("rotate").catch(() => {
+   290→        this.cbs.onLog("warn", "تمدید ناموفق بود — سشن فعلی همچنان فعال است");
+   291→        this.scheduleRotationRetry();
+   292→      });
+   293→    } else {
+   294→      this.cbs.onLog("warn", "الان امکان تمدید نیست (سوکت در حال تعویض است)");
+   295→    }
+   296→  }
+   297→
+   298→  // ── جریان صدا ──
+   299→  private handleAudioChunk(chunk: Float32Array) {
+   300→    // سطح صدای ورودی (تا ۱۰ بار در ثانیه push شود)
+   301→    let max = 0;
+   302→    for (let i = 0; i < chunk.length; i++) {
+   303→      const a = Math.abs(chunk[i]);
+   304→      if (a > max) max = a;
+   305→    }
+   306→    const now = Date.now();
+   307→    if (now - this.lastLevelPush > 100) {
+   308→      this.lastLevelPush = now;
+   309→      this.cbs.onStats({ inputLevel: Math.min(1, max * 2.2) });
+   310→    }
+   311→
+   312→    const sock = this.activeSocket;
+   313→    if (sock && sock.readyState === WebSocket.OPEN) {
+   314→      this.sendPcmChunk(sock, chunk);
+   315→    } else {
+   316→      if (this.pendingChunks.length >= MAX_PENDING_CHUNKS) this.pendingChunks.shift();
+   317→      this.pendingChunks.push(chunk);
+   318→    }
+   319→  }
+   320→
+   321→  private flushPendingChunks() {
+   322→    const sock = this.activeSocket;
+   323→    if (!sock || sock.readyState !== WebSocket.OPEN) return;
+   324→    while (this.pendingChunks.length) {
+   325→      const c = this.pendingChunks.shift();
+   326→      if (c) this.sendPcmChunk(sock, c);
+   327→    }
+   328→  }
+   329→
+   330→  private sendPcmChunk(sock: WebSocket, f32: Float32Array) {
+   331→    if (sock.readyState !== WebSocket.OPEN) return;
+   332→    const int16 = new Int16Array(f32.length);
+   333→    for (let i = 0; i < f32.length; i++) {
+   334→      const s = Math.max(-1, Math.min(1, f32[i]));
+   335→      int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+   336→    }
+   337→    const b64 = bytesToBase64(new Uint8Array(int16.buffer));
+   338→    sock.send(
+   339→      JSON.stringify({
+   340→        realtimeInput: {
+   341→          audio: { data: b64, mimeType: "audio/pcm;rate=16000" },
+   342→        },
+   343→      })
+   344→    );
+   345→    this.sentBytes += int16.length * 2;
+   346→  }
+   347→
+   348→  // ── اتصال WebSocket + Session Rotation ──
+   349→  private openSocket(mode: "initial" | "rotate" | "reconnect"): Promise<void> {
+   350→    return new Promise<void>((resolve, reject) => {
+   351→      if (!this.running) return reject(new Error("stopped"));
+   352→
+   353→      const ws = new WebSocket(`${WS_BASE}?key=${encodeURIComponent(this.apiKey)}`);
+   354→      let settled = false;
+   355→      this.connectingSocket = ws;
+   356→
+   357→      const connectTimeout = setTimeout(() => {
+   358→        if (!settled) {
+   359→          try {
+   360→            ws.close();
+   361→          } catch {
+   362→            /* ignore */
+   363→          }
+   364→        }
+   365→      }, CONNECT_TIMEOUT_MS);
+   366→
+   367→      ws.onopen = () => {
+   368→        this.cbs.onLog("info", `WebSocket وصل شد (${mode})`);
+   369→        ws.send(
+   370→          JSON.stringify({
+   371→            setup: {
+   372→              model: MODEL,
+   373→              generationConfig: {
+   374→                responseModalities: ["AUDIO"],
+   375→                translationConfig: {
+   376→                  targetLanguageCode: this.targetLang,
+   377→                  echoTargetLanguage: true,
+   378→                },
+   379→              },
+   380→              inputAudioTranscription: {},
+   381→              outputAudioTranscription: {},
+   382→            },
+   383→          })
+   384→        );
+   385→      };
+   386→
+   387→      ws.onmessage = (event) => {
+   388→        this.handleServerMessage(ws, event.data, mode).then((ready) => {
+   389→          if (ready && !settled) {
+   390→            settled = true;
+   391→            clearTimeout(connectTimeout);
+   392→            this.activateSocket(ws, mode);
+   393→            resolve();
+   394→          }
+   395→        });
+   396→      };
+   397→
+   398→      ws.onerror = () => {
+   399→        /* جزئیات در onclose می‌آید */
+   400→      };
+   401→
+   402→      ws.onclose = (e) => {
+   403→        clearTimeout(connectTimeout);
+   404→        this.cbs.onLog(
+   405→          e.code === 1000 ? "info" : "warn",
+   406→          `WebSocket بسته شد (کد ${e.code})${e.reason ? ` — ${e.reason}` : ""}`
+   407→        );
+   408→        if (this.connectingSocket === ws) this.connectingSocket = null;
+   409→        if (!settled) {
+   410→          settled = true;
+   411→          reject(new Error(`اتصال برقرار نشد (کد ${e.code})`));
+   412→          return;
+   413→        }
+   414→        if (ws === this.activeSocket && this.running) {
+   415→          this.activeSocket = null;
+   416→          this.scheduleReconnect();
+   417→        }
+   418→      };
+   419→    });
+   420→  }
+   421→
+   422→  private activateSocket(ws: WebSocket, mode: "initial" | "rotate" | "reconnect") {
+   423→    const old = this.activeSocket;
+   424→    this.activeSocket = ws;
+   425→    this.connectingSocket = null;
+   426→
+   427→    if (old && old !== ws) {
+   428→      try {
+   429→        old.onmessage = null;
+   430→        old.onclose = null;
+   431→        old.onerror = null;
+   432→        old.close();
+   433→      } catch {
+   434→        /* ignore */
+   435→      }
+   436→    }
+   437→
+   438→    this.reconnectAttempts = 0;
+   439→    this.flushPendingChunks();
+   440→
+   441→    if (mode === "rotate") {
+   442→      this.rotations++;
+   443→      this.cbs.onLog("ok", `سشن تمدید شد (#${this.rotations}) — بدون هیچ وقفه‌ای`);
+   444→      this.cbs.onStats({ phase: "live", message: `سشن تمدید شد (#${this.rotations}) ✅`, rotations: this.rotations });
+   445→    } else if (mode === "reconnect") {
+   446→      this.cbs.onLog("ok", "اتصال برقرار شد ✓");
+   447→      this.cbs.onStats({ phase: "live", message: "اتصال برقرار شد ✅" });
+   448→    }
+   449→    this.pushKb();
+   450→    this.scheduleRotation();
+   451→  }
+   452→
+   453→  private scheduleRotation() {
+   454→    clearTimeout(this.rotationTimer);
+   455→    if (!this.running) return;
+   456→    this.rotationTimer = setTimeout(() => {
+   457→      if (!this.running) return;
+   458→      if (this.activeSocket && this.activeSocket.readyState === WebSocket.OPEN && !this.connectingSocket) {
+   459→        this.cbs.onLog("info", "Session Rotation خودکار — باز کردن سشن جدید…");
+   460→        this.cbs.onStats({ phase: "rotating", message: "تمدید خودکار سشن…" });
+   461→        this.openSocket("rotate").catch(() => this.scheduleRotationRetry());
+   462→      } else {
+   463→        this.scheduleRotation();
+   464→      }
+   465→    }, SESSION_ROTATE_MS);
+   466→  }
+   467→
+   468→  private scheduleRotationRetry() {
+   469→    clearTimeout(this.rotationTimer);
+   470→    if (!this.running) return;
+   471→    this.rotationTimer = setTimeout(() => {
+   472→      if (this.running) this.scheduleRotation();
+   473→    }, 5000);
+   474→  }
+   475→
+   476→  private scheduleReconnect() {
+   477→    if (!this.running) return;
+   478→    clearTimeout(this.reconnectTimer);
+   479→    const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts), RECONNECT_MAX_MS);
+   480→    this.reconnectAttempts++;
+   481→    this.reconnects++;
+   482→    this.cbs.onLog("warn", `قطع شد؛ تلاش مجدد در ${(delay / 1000).toFixed(1)}s (تلاش ${this.reconnectAttempts})`);
+   483→    this.cbs.onStats({
+   484→      phase: "reconnecting",
+   485→      message: `قطع شد؛ اتصال مجدد در ${(delay / 1000).toFixed(1)} ثانیه…`,
+   486→      reconnects: this.reconnects,
+   487→    });
+   488→    this.pushKb();
+   489→    this.reconnectTimer = setTimeout(() => {
+   490→      if (!this.running) return;
+   491→      this.openSocket("reconnect").catch(() => this.scheduleReconnect());
+   492→    }, delay);
+   493→  }
+   494→
+   495→  // ── پیام‌های سرور ──
+   496→  private async handleServerMessage(
+   497→    ws: WebSocket,
+   498→    data: unknown,
+   499→    mode: "initial" | "rotate" | "reconnect"
+   500→  ): Promise<boolean> {
+   501→    let text: string;
+   502→    if (data instanceof Blob) {
+   503→      text = await data.text();
+   504→    } else if (typeof data === "string") {
+   505→      text = data;
+   506→    } else {
+   507→      return false;
+   508→    }
+   509→
+   510→    let msg: Record<string, unknown>;
+   511→    try {
+   512→      msg = JSON.parse(text) as Record<string, unknown>;
+   513→    } catch {
+   514→      return false;
+   515→    }
+   516→
+   517→    if (msg.setupComplete) {
+   518→      this.cbs.onLog("ok", `Setup complete (${mode}) ✓`);
+   519→      return true;
+   520→    }
+   521→
+   522→    // ⭐ خطاهای سرور — مثل کلید نامعتبر / دسترسی به مدل / کوتا
+   523→    if (msg.error) {
+   524→      const err = msg.error as { message?: string; code?: number; status?: string };
+   525→      const m = `[${err.code ?? "?"} ${err.status ?? ""}] ${err.message ?? "خطای ناشناخته سرور"}`;
+   526→      this.serverError = m;
+   527→      this.cbs.onLog("error", `خطای سرور: ${m}`);
+   528→      this.cbs.onStats({ serverError: m, message: "خطای سرور Gemini — جزئیات در لاگ" });
+   529→      return false;
+   530→    }
+   531→
+   532→    if (msg.goAway) {
+   533→      this.cbs.onLog("info", "سرور goAway فرستاد → تمدید فوری سشن");
+   534→      if (this.running && this.activeSocket === ws && !this.connectingSocket) {
+   535→        this.openSocket("rotate").catch(() => this.scheduleRotationRetry());
+   536→      }
+   537→      return false;
+   538→    }
+   539→
+   540→    const content = msg.serverContent as
+   541→      | {
+   542→          interrupted?: boolean;
+   543→          inputTranscription?: { text?: string };
+   544→          outputTranscription?: { text?: string };
+   545→          modelTurn?: { parts?: Array<{ inlineData?: { data?: string } }> };
+   546→        }
+   547→      | undefined;
+   548→    if (!content) return false;
+   549→
+   550→    if (content.interrupted && this.playbackCtx) {
+   551→      this.nextPlayTime = this.playbackCtx.currentTime + 0.005;
+   552→    }
+   553→
+   554→    if (content.inputTranscription?.text) {
+   555→      this.cbs.onTranscript("in", content.inputTranscription.text);
+   556→    }
+   557→    if (content.outputTranscription?.text) {
+   558→      this.cbs.onTranscript("out", content.outputTranscription.text);
+   559→    }
+   560→
+   561→    if (content.modelTurn?.parts) {
+   562→      for (const part of content.modelTurn.parts) {
+   563→        if (part.inlineData?.data) {
+   564→          this.recvAudioBytes += (part.inlineData.data.length * 3) / 4;
+   565→          this.playTranslatedAudio(part.inlineData.data);
+   566→        }
+   567→      }
+   568→      this.pushKb();
+   569→    }
+   570→    return false;
+   571→  }
+   572→
+   573→  // ── پخش صدای دوبله ──
+   574→  private playTranslatedAudio(b64: string) {
+   575→    if (!this.playbackCtx || !this.masterGain) return;
+   576→    try {
+   577→      const binary = atob(b64);
+   578→      const bytes = new Uint8Array(binary.length);
+   579→      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+   580→      const int16 = new Int16Array(bytes.buffer);
+   581→      const f32 = new Float32Array(int16.length);
+   582→      for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+   583→
+   584→      const buffer = this.playbackCtx.createBuffer(1, f32.length, 24000);
+   585→      buffer.getChannelData(0).set(f32);
+   586→      const src = this.playbackCtx.createBufferSource();
+   587→      src.buffer = buffer;
+   588→      src.connect(this.masterGain);
+   589→
+   590→      const now = this.playbackCtx.currentTime;
+   591→      if (this.nextPlayTime < now || this.nextPlayTime - now > 0.08) {
+   592→        this.nextPlayTime = now + 0.005;
+   593→      }
+   594→      src.start(this.nextPlayTime);
+   595→      this.nextPlayTime += buffer.duration;
+   596→    } catch (e) {
+   597→      this.cbs.onLog("error", `خطای پخش: ${e instanceof Error ? e.message : String(e)}`);
+   598→    }
+   599→  }
+   600→
+   601→  private startOutputMeter() {
+   602→    const analyser = this.analyser;
+   603→    if (!analyser) return;
+   604→    const buf = new Float32Array(analyser.fftSize);
+   605→    this.analyserTimer = setInterval(() => {
+   606→      if (!this.analyser) return;
+   607→      this.analyser.getFloatTimeDomainData(buf);
+   608→      let peak = 0;
+   609→      for (let i = 0; i < buf.length; i++) {
+   610→        const a = Math.abs(buf[i]);
+   611→        if (a > peak) peak = a;
+   612→      }
+   613→      this.cbs.onStats({ outputLevel: Math.min(1, peak * 2.2) });
+   614→    }, 120);
+   615→  }
+   616→
+   617→  private pushKb() {
+   618→    this.cbs.onStats({
+   619→      sentKb: Math.round(this.sentBytes / 1024),
+   620→      recvKb: Math.round(this.recvAudioBytes / 1024),
+   621→    });
+   622→  }
+   623→
+   624→  get errorText(): string {
+   625→    return this.serverError;
+   626→  }
+   627→}
+   628→
+   629→// ─────────────── UI ───────────────
+   630→
+   631→export default function LiveDubTester() {
+   632→  const [apiKey, setApiKey] = useState("");
+   633→  const [showKey, setShowKey] = useState(false);
+   634→  const [lang, setLang] = useState("fa");
+   635→  const [source, setSource] = useState<"tab" | "mic">("tab");
+   636→
+   637→  const [stats, setStats] = useState<Stats>(INITIAL_STATS);
+   638→  const [logs, setLogs] = useState<LogLine[]>([]);
+   639→  const [subs, setSubs] = useState<SubLine[]>([]);
+   640→  const [uptime, setUptime] = useState(0);
+   641→
+   642→  const engineRef = useRef<DubEngine | null>(null);
+   643→  const startedAtRef = useRef(0);
+   644→  const logBoxRef = useRef<HTMLDivElement | null>(null);
+   645→
+   646→  const running = stats.phase !== "idle" && stats.phase !== "error";
+   647→
+   648→  // بارگذاری/ذخیره کلید و زبان در localStorage (فقط سمت مرورگر)
+   649→  useEffect(() => {
+   650→    const t = setTimeout(() => {
+   651→      setApiKey(window.localStorage.getItem("livedub_web_api_key") ?? "");
+   652→      setLang(window.localStorage.getItem("livedub_web_lang") ?? "fa");
+   653→    }, 0);
+   654→    return () => clearTimeout(t);
+   655→  }, []);
+   656→  useEffect(() => {
+   657→    if (apiKey) window.localStorage.setItem("livedub_web_api_key", apiKey);
+   658→  }, [apiKey]);
+   659→  useEffect(() => {
+   660→    window.localStorage.setItem("livedub_web_lang", lang);
+   661→  }, [lang]);
+   662→
+   663→  // uptime تایمر (ریست در cleanup هنگام توقف)
+   664→  useEffect(() => {
+   665→    if (!running) return;
+   666→    const t = setInterval(() => {
+   667→      if (startedAtRef.current) {
+   668→        setUptime(Math.floor((Date.now() - startedAtRef.current) / 1000));
+   669→      }
+   670→    }, 1000);
+   671→    return () => {
+   672→      clearInterval(t);
+   673→      setUptime(0);
+   674→    };
+   675→  }, [running]);
+   676→
+   677→  // اسکرول خودکار لاگ
+   678→  useEffect(() => {
+   679→    const el = logBoxRef.current;
+   680→    if (el) el.scrollTop = el.scrollHeight;
+   681→  }, [logs]);
+   682→
+   683→  const pushLog = useCallback((kind: LogLine["kind"], msg: string) => {
+   684→    const time = new Date().toLocaleTimeString("fa-IR", { hour12: false });
+   685→    setLogs((prev) => {
+   686→      const next = [...prev, { time, kind, msg }];
+   687→      return next.length > 130 ? next.slice(next.length - 130) : next;
+   688→    });
+   689→  }, []);
+   690→
+   691→  const pushTranscript = useCallback((dir: "in" | "out", text: string) => {
+   692→    const t = (text || "").trim();
+   693→    if (!t) return;
+   694→    setSubs((prev) => {
+   695→      const last = prev[prev.length - 1];
+   696→      if (last && last.dir === dir && (last.text + " " + t).length < 90) {
+   697→        const copy = prev.slice(0, -1);
+   698→        copy.push({ dir, text: last.text + " " + t });
+   699→        return copy;
+   700→      }
+   701→      const next = [...prev, { dir, text: t }];
+   702→      return next.length > 40 ? next.slice(next.length - 40) : next;
+   703→    });
+   704→  }, []);
+   705→
+   706→  const handleStart = useCallback(() => {
+   707→    const key = apiKey.trim();
+   708→    if (!key) {
+   709→      pushLog("error", "اول کلید Gemini API را وارد کنید (از aistudio.google.com)");
+   710→      setStats((s) => ({ ...s, message: "کلید API را وارد کنید" }));
+   711→      return;
+   712→    }
+   713→    if (engineRef.current) {
+   714→      engineRef.current.stop();
+   715→      engineRef.current = null;
+   716→    }
+   717→    setSubs([]);
+   718→    setStats({ ...INITIAL_STATS });
+   719→    startedAtRef.current = Date.now();
+   720→
+   721→    const engine = new DubEngine(key, lang, source, {
+   722→      onStats: (patch) => setStats((s) => ({ ...s, ...patch })),
+   723→      onLog: pushLog,
+   724→      onTranscript: pushTranscript,
+   725→      onStopped: (reason) => {
+   726→        pushLog("warn", reason);
+   727→        setStats((s) => ({ ...s, message: reason }));
+   728→      },
+   729→    });
+   730→    engineRef.current = engine;
+   731→    void engine.start();
+   732→  }, [apiKey, lang, source, pushLog, pushTranscript]);
+   733→
+   734→  const handleStop = useCallback(() => {
+   735→    engineRef.current?.stop();
+   736→    engineRef.current = null;
+   737→    startedAtRef.current = 0;
+   738→  }, []);
+   739→
+   740→  const handleRotateNow = useCallback(() => {
+   741→    engineRef.current?.rotateNow();
+   742→  }, []);
+   743→
+   744→  const copyLogs = useCallback(() => {
+   745→    const text = logs.map((l) => `[${l.time}] ${l.kind.toUpperCase()} — ${l.msg}`).join("\n");
+   746→    void navigator.clipboard.writeText(text).then(() => pushLog("ok", "لاگ کپی شد"));
+   747→  }, [logs, pushLog]);
+   748→
+   749→  // پاکسازی هنگام خروج از صفحه
+   750→  useEffect(() => {
+   751→    return () => {
+   752→      engineRef.current?.stop();
+   753→      engineRef.current = null;
+   754→    };
+   755→  }, []);
+   756→
+   757→  const phaseLabel: Record<Phase, string> = {
+   758→    idle: "غیرفعال",
+   759→    starting: "آماده‌سازی…",
+   760→    connecting: "اتصال…",
+   761→    live: "در حال دوبله",
+   762→    rotating: "تمدید سشن…",
+   763→    reconnecting: "اتصال مجدد…",
+   764→    error: "خطا",
+   765→  };
+   766→  const phaseColor =
+   767→    stats.phase === "live"
+   768→      ? "bg-emerald-500"
+   769→      : stats.phase === "error"
+   770→        ? "bg-red-500"
+   771→        : stats.phase === "reconnecting" || stats.phase === "rotating"
+   772→          ? "bg-amber-400"
+   773→          : "bg-slate-500";
+   774→
+   775→  return (
+   776→    <div className="rounded-2xl border border-emerald-500/25 bg-[#0d1312] p-4 sm:p-6 shadow-[0_10px_40px_rgba(0,0,0,0.35)]">
+   777→      {/* ── تنظیمات ── */}
+   778→      <div className="grid gap-3 sm:grid-cols-12">
+   779→        <div className="sm:col-span-5">
+   780→          <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-200/70">
+   781→            <KeyRound className="h-3.5 w-3.5" /> کلید Gemini API
+   782→          </label>
+   783→          <div className="relative" dir="ltr">
+   784→            <Input
+   785→              type={showKey ? "text" : "password"}
+   786→              value={apiKey}
+   787→              onChange={(e) => setApiKey(e.target.value)}
+   788→              placeholder="AIzaSy…"
+   789→              disabled={running}
+   790→              className="h-11 border-white/10 bg-black/40 pe-10 text-left font-mono text-[13px] text-emerald-100 placeholder:text-white/25 focus-visible:ring-emerald-500/40"
+   791→            />
+   792→            <button
+   793→              type="button"
+   794→              onClick={() => setShowKey((v) => !v)}
+   795→              className="absolute end-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-emerald-300"
+   796→              aria-label="نمایش/مخفی کردن کلید"
+   797→            >
+   798→              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+   799→            </button>
+   800→          </div>
+   801→        </div>
+   802→
+   803→        <div className="sm:col-span-3">
+   804→          <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-200/70">
+   805→            <Sparkles className="h-3.5 w-3.5" /> زبان خروجی
+   806→          </label>
+   807→          <select
+   808→            value={lang}
+   809→            onChange={(e) => setLang(e.target.value)}
+   810→            disabled={running}
+   811→            className="h-11 w-full rounded-md border border-white/10 bg-black/40 px-3 text-[13px] text-emerald-100 outline-none focus:border-emerald-500/50 disabled:opacity-50"
+   812→          >
+   813→            {LANGS.map(([code, label]) => (
+   814→              <option key={code} value={code} className="bg-[#0d1312]">
+   815→                {label}
+   816→              </option>
+   817→            ))}
+   818→          </select>
+   819→        </div>
+   820→
+   821→        <div className="sm:col-span-4">
+   822→          <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-200/70">
+   823→            <Mic className="h-3.5 w-3.5" /> منبع صدا
+   824→          </label>
+   825→          <div className="grid h-11 grid-cols-2 overflow-hidden rounded-md border border-white/10 bg-black/40 p-1">
+   826→            {(
+   827→              [
+   828→                ["tab", "صدای تب/سیستم"],
+   829→                ["mic", "میکروفون"],
+   830→              ] as Array<["tab" | "mic", string]>
+   831→            ).map(([val, label]) => (
+   832→              <button
+   833→                key={val}
+   834→                type="button"
+   835→                disabled={running}
+   836→                onClick={() => setSource(val)}
+   837→                className={`rounded-[5px] text-[12px] font-bold transition-colors disabled:opacity-60 ${
+   838→                  source === val
+   839→                    ? "bg-emerald-500 text-[#04110c]"
+   840→                    : "text-emerald-100/60 hover:text-emerald-100"
+   841→                }`}
+   842→              >
+   843→                {label}
+   844→              </button>
+   845→            ))}
+   846→          </div>
+   847→        </div>
+   848→      </div>
+   849→
+   850→      {/* ── دکمه‌ها ── */}
+   851→      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+   852→        {!running ? (
+   853→          <Button
+   854→            onClick={handleStart}
+   855→            className="h-11 rounded-xl bg-emerald-500 px-6 font-extrabold text-[#04110c] shadow-[0_6px_24px_rgba(16,185,129,0.35)] hover:bg-emerald-400"
+   856→          >
+   857→            <Mic className="me-2 h-4.5 w-4.5" />
+   858→            شروع دوبله زنده
+   859→          </Button>
+   860→        ) : (
+   861→          <Button
+   862→            onClick={handleStop}
+   863→            variant="outline"
+   864→            className="h-11 rounded-xl border-red-500/40 bg-red-500/10 px-6 font-extrabold text-red-300 hover:bg-red-500/20 hover:text-red-200"
+   865→          >
+   866→            <CircleStop className="me-2 h-4.5 w-4.5" />
+   867→            توقف
+   868→          </Button>
+   869→        )}
+   870→
+   871→        {running && (
+   872→          <>
+   873→            <Button
+   874→              onClick={handleRotateNow}
+   875→              variant="outline"
+   876→              size="sm"
+   877→              className="h-10 rounded-xl border-emerald-500/30 text-emerald-200 hover:bg-emerald-500/10 hover:text-emerald-100"
+   878→            >
+   879→              <RefreshCw className="me-2 h-4 w-4" />
+   880→              تست چرخش سشن
+   881→            </Button>
+   882→            <Badge className="border-white/10 bg-white/5 text-emerald-200/80 hover:bg-white/10">
+   883→              {faNum(Math.floor(uptime / 60))}:{faNum(String(uptime % 60).padStart(2, "0"))} از شروع
+   884→            </Badge>
+   885→          </>
+   886→        )}
+   887→
+   888→        <span className="ms-auto inline-flex items-center gap-2 text-[11.5px] text-emerald-100/60">
+   889→          <span className={`h-2 w-2 animate-pulse rounded-full ${phaseColor}`} />
+   890→          {phaseLabel[stats.phase]}
+   891→          {stats.message && <span className="text-emerald-100/45">— {stats.message}</span>}
+   892→        </span>
+   893→      </div>
+   894→
+   895→      {/* ── هشدار خطای سرور ── */}
+   896→      {stats.serverError && (
+   897→        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-[12.5px] leading-6 text-red-300">
+   898→          ⚠ خطای سرور: <span dir="ltr">{stats.serverError}</span>
+   899→        </div>
+   900→      )}
+   901→
+   902→      {/* ── راهنمای تست ── */}
+   903→      {!running && stats.phase !== "error" && (
+   904→        <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3">
+   905→          <p className="flex items-start gap-2 text-[12px] leading-6 text-emerald-100/65">
+   906→            <Info className="mt-1 h-4 w-4 shrink-0 text-emerald-400" />
+   907→            <span>
+   908→              <b className="text-emerald-200">راهنمای تست:</b> کلید رایگان را از{" "}
+   909→              <span dir="ltr" className="text-emerald-300">aistudio.google.com</span> بگیرید → «شروع دوبله» را بزنید → در
+   910→              پنجره اشتراک، تب <b>یک تب کروم</b> را انتخاب کرده و <b className="text-emerald-300">گزینه اشتراک صدا را فعال</b> کنید →
+   911→              در همان تب یوتیوب پخش کنید؛ صدای دوبله از همین صفحه پخش می‌شود. اگر مرورگر اجازه نداد، صفحه را با دکمه
+   912→              «Open in New Tab» بالای پنل باز کنید. 🔒 کلید فقط در مرورگر شما ذخیره می‌شود.
+   913→            </span>
+   914→          </p>
+   915→        </div>
+   916→      )}
+   917→
+   918→      {/* ── پنل زنده ── */}
+   919→      {running && (
+   920→        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+   921→          {/* مترها و آمار */}
+   922→          <div className="rounded-xl border border-white/8 bg-white/[0.03] p-4">
+   923→            <div className="mb-3 flex items-center gap-2 text-[12px] font-bold text-emerald-200">
+   924→              <Activity className="h-4 w-4 text-emerald-400" /> پایش زنده
+   925→            </div>
+   926→
+   927→            <div className="space-y-2.5">
+   928→              <MeterBar label="صدای ورودی از تب/میکروفون" value={stats.inputLevel} color="bg-emerald-400" />
+   929→              <MeterBar label="صدای دوبله (خروجی)" value={stats.outputLevel} color="bg-amber-300" />
+   930→            </div>
+   931→
+   932→            <div className="mt-4 grid grid-cols-4 gap-2 text-center">
+   933→              <StatChip icon={ArrowUpFromLine} label="ارسالی" value={`${faNum(stats.sentKb)} KB`} />
+   934→              <StatChip icon={ArrowDownToLine} label="دوبله" value={`${faNum(stats.recvKb)} KB`} />
+   935→              <StatChip icon={RefreshCw} label="تمدید" value={faNum(stats.rotations)} />
+   936→              <StatChip icon={BadgeCheck} label="Reconnect" value={faNum(stats.reconnects)} />
+   937→            </div>
+   938→
+   939→            {stats.recvKb === 0 && stats.sentKb > 30 && (
+   940→              <p className="mt-3 rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[11.5px] leading-5 text-amber-300">
+   941→                صدا در حال ارسال است ولی هنوز دوبله‌ای برنگشته — چند ثانیه صبر کنید؛ اگر ادامه پیدا کرد،
+   942→                مطمئن شوید در تب مقصد واقعاً صدا پخش می‌شود.
+   943→              </p>
+   944→            )}
+   945→          </div>
+   946→
+   947→          {/* زیرنویس زنده */}
+   948→          <div className="rounded-xl border border-white/8 bg-white/[0.03] p-4">
+   949→            <div className="mb-3 flex items-center gap-2 text-[12px] font-bold text-emerald-200">
+   950→              <ScrollText className="h-4 w-4 text-emerald-400" /> زیرنویس زنده
+   951→            </div>
+   952→            <div className="h-44 space-y-1.5 overflow-y-auto pe-1" dir="rtl">
+   953→              {subs.length === 0 && (
+   954→                <p className="text-[12px] text-emerald-100/40">
+   955→                  هنوز گفتاری تشخیص داده نشده — صدا را پخش کنید…
+   956→                </p>
+   957→              )}
+   958→              {subs.map((s, i) => (
+   959→                <p
+   960→                  key={i}
+   961→                  className={`rounded-lg px-2.5 py-1.5 text-[12.5px] leading-6 ${
+   962→                    s.dir === "out"
+   963→                      ? "bg-emerald-500/10 text-emerald-200"
+   964→                      : "bg-white/[0.04] text-emerald-100/60"
+   965→                  }`}
+   966→                >
+   967→                  {s.dir === "out" ? "★ " : "⇢ "}
+   968→                  {s.text}
+   969→                </p>
+   970→              ))}
+   971→            </div>
+   972→          </div>
+   973→        </div>
+   974→      )}
+   975→
+   976→      {/* ── کنسول لاگ ── */}
+   977→      <div className="mt-3 rounded-xl border border-white/8 bg-black/40">
+   978→        <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
+   979→          <span className="flex items-center gap-2 text-[11.5px] font-bold text-emerald-200/70">
+   980→            <ScrollText className="h-3.5 w-3.5" /> لاگ عیب‌یابی
+   981→          </span>
+   982→          <button
+   983→            type="button"
+   984→            onClick={copyLogs}
+   985→            className="flex items-center gap-1 text-[11px] text-emerald-300/80 hover:text-emerald-200"
+   986→          >
+   987→            <Copy className="h-3.5 w-3.5" /> کپی لاگ
+   988→          </button>
+   989→        </div>
+   990→        <div
+   991→          ref={logBoxRef}
+   992→          dir="ltr"
+   993→          className="live-dub-logs h-40 overflow-y-auto px-4 py-2 font-mono text-[11px] leading-5"
+   994→        >
+   995→          {logs.length === 0 && <p className="text-white/25">Waiting for events…</p>}
+   996→          {logs.map((l, i) => (
+   997→            <p
+   998→              key={i}
+   999→              className={
+  1000→                l.kind === "error"
+  1001→                  ? "text-red-400"
+  1002→                  : l.kind === "warn"
+  1003→                    ? "text-amber-300"
+  1004→                    : l.kind === "ok"
+  1005→                      ? "text-emerald-300"
+  1006→                      : "text-white/55"
+  1007→              }
+  1008→            >
+  1009→              <span className="text-white/30">{l.time}</span> {l.msg}
+  1010→            </p>
+  1011→          ))}
+  1012→        </div>
+  1013→      </div>
+  1014→    </div>
+  1015→  );
+  1016→}
+  1017→
+  1018→// ─────────────── زیرکامپوننت‌ها ───────────────
+  1019→
+  1020→function MeterBar({ label, value, color }: { label: string; value: number; color: string }) {
+  1021→  const pct = Math.min(100, Math.max(0, value * 100));
+  1022→  return (
+  1023→    <div>
+  1024→      <div className="mb-1 flex justify-between text-[11px] text-emerald-100/55">
+  1025→        <span>{label}</span>
+  1026→        <span>{faNum(Math.round(pct))}٪</span>
+  1027→      </div>
+  1028→      <div className="h-2 overflow-hidden rounded-full bg-white/8">
+  1029→        <div
+  1030→          className={`h-full rounded-full transition-[width] duration-100 ${color}`}
+  1031→          style={{ width: `${pct}%` }}
+  1032→        />
+  1033→      </div>
+  1034→    </div>
+  1035→  );
+  1036→}
+  1037→
+  1038→function StatChip({
+  1039→  icon: Icon,
+  1040→  label,
+  1041→  value,
+  1042→}: {
+  1043→  icon: React.ComponentType<{ className?: string }>;
+  1044→  label: string;
+  1045→  value: string;
+  1046→}) {
+  1047→  return (
+  1048→    <div className="rounded-lg border border-white/8 bg-black/30 px-1.5 py-2">
+  1049→      <Icon className="mx-auto mb-1 h-3.5 w-3.5 text-emerald-400" />
+  1050→      <p className="text-[13px] font-extrabold text-emerald-200">{value}</p>
+  1051→      <p className="text-[9.5px] text-emerald-100/45">{label}</p>
+  1052→    </div>
+  1053→  );
+  1054→}
+  1055→

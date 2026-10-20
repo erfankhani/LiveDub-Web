@@ -140,3 +140,26 @@ Stage Summary:
 - ریپو https://github.com/erfankhani/LiveDub-Android — HEAD = db63e75 (v2.2)، بیلد سبز، APK آماده دانلود از Actions → Artifacts
 - فیکس‌های v2.2 اکنون در APK رسمی: فعال‌سازی فوری سوکت مثل اکستنشن + نوار تشخیص سه‌چراغی + heartbeat ضبط + RECORD_AUDIO
 - توکن دوباره در چت لو رفته — کاربر باید revoke کند (یادآوری شد)
+
+---
+Task ID: 7
+Agent: main (Z.ai Code)
+Task: رفع ریشه‌ای «ارسال می‌شود ولی دریافت صفر است» — فریم باینری WebSocket (v2.3)
+
+Work Log:
+- تحلیل اسکرین‌شات جدید کاربر: sent=1559KB ↑، recv=0KB، reconnects=0، تأیید سرور «در انتظار»، ۵۱ ثانیه پایدار → کلید معتبر است (کلید نامعتبر در ~۱ ثانیه با 1007 بسته می‌شود — با تست Node تأیید شد)، سوکت سالم است، فقط هیچ پیامی از سرور پردازش نمی‌شود
+- مقایسه سطر به سطر: JSON پروتکل (setup/realtimeInput/پارس پاسخ) بین اکستنشن و اندروید ۱۰۰٪ یکسان بود → مشکل در لایه فریم بود
+- سرنخ کلیدی: اکستنشن کروم `event.data instanceof Blob` را هندل می‌کرد؛ SDK رسمی گوگل (@google/genai v1.16 از jsdelivr دانلود شد) هم Blob و هم ArrayBuffer را هندل می‌کند → سرور Gemini Live پاسخ JSON را با «فریم باینری» می‌فرستد
+- در OkHttp، override نکردن onMessage(WebSocket, ByteString) یعنی پیاده‌سازی پیش‌فرضِ خالی → همه فریم‌های باینری (setupComplete، صدا، خطاها) بی‌صدا دور ریخته می‌شد — دقیقاً علامت‌های مشاهده‌شده
+- GeminiLiveClient.kt: import okio.ByteString + override onMessage(bytes) → bytes.utf8() به هندلر متن + شمارنده msgInCount برای هر پیام ورودی
+- LiveDubService: EXTRA_MSG_IN در broadcastStatsLive؛ MainActivity: فیلد msgIn در StatusSnapshot
+- AppScreen.kt: نوار تشخیص از ۳ چراغ به ۴ چراغ (۲×۲) تبدیل شد — چراغ جدید «پیام سرور» با شمارنده زنده (سبز: N پیام / قرمز: صفر)
+- نسخه 2.3.0 (versionCode 3) + README (جدول ۴ چراغ + ردیف باگ باینری + نکته v2.3) + page.tsx به v2.3 + zip بازسازی (154KB)
+- تست Node: کلید نامعتبر → بسته شدن فوری 1007 بدون هیچ پیام JSON (پس ۵۱ ثانیه اتصال پایدار کاربر = کلید معتبر)
+- پوش db63e75..db73f67 با توکن کاربر → CI run 39424845155 در ~۴ دقیقه SUCCESS ✓ — آرتیفکت‌ها: debug (13.6MB) + release-unsigned (1.3MB)
+- remote باز هم بلافاصله حذف شد؛ توکن دوباره در چت لو رفته
+
+Stage Summary:
+- ریپو https://github.com/erfankhani/LiveDub-Android — HEAD = db73f67 (v2.3.0)، بیلد سبز
+- APK v2.3 با فیکس ریشه‌ای: چراغ «پیام سرور» در اپ باید بالای صفر بماند و «دوبله دریافتی» KB بگیرد
+- یادآوری: توکن ghp_3qYd... باید revoke شود

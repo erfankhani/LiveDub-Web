@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -34,6 +35,11 @@ class LiveDubService : Service() {
         const val ACTION_START = "com.livedub.app.action.START"
         const val ACTION_STOP = "com.livedub.app.action.STOP"
         const val ACTION_STATUS = "com.livedub.app.action.STATUS"
+        // ⭐ v2.4: کنترل زنده ولوم‌ها از UI — بدون نیاز به ری‌استارت دوبله
+        const val ACTION_SET_DUB_VOLUME = "com.livedub.app.action.SET_DUB_VOLUME"
+        const val ACTION_SET_MEDIA_VOLUME = "com.livedub.app.action.SET_MEDIA_VOLUME"
+        const val EXTRA_DUB_VOL = "dubVol"       // Float 0..1 → گین صدای دوبله
+        const val EXTRA_MEDIA_VOL = "mediaVol"   // Int 0..max → ولوم رسانه (صدای اپ مبدأ)
 
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
@@ -102,9 +108,31 @@ class LiveDubService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> startDubbing(intent)
+            // ⭐ v2.4: تغییر زنده ولوم دوبله حین دوبله (بدون ری‌استارت)
+            ACTION_SET_DUB_VOLUME -> {
+                val v = intent.getFloatExtra(EXTRA_DUB_VOL, 1f).coerceIn(0f, 1f)
+                player?.setVolume(v)
+                getSharedPreferences("livedub", Context.MODE_PRIVATE)
+                    .edit().putFloat("dubVolume", v).apply()
+                return START_NOT_STICKY
+            }
+            // ⭐ v2.4: کنترل زنده «صدای اصلی» = ولوم استریم رسانه (همان ولومی که اپ مبدأ مثل یوتیوب پخش می‌کند)
+            ACTION_SET_MEDIA_VOLUME -> {
+                val v = intent.getIntExtra(EXTRA_MEDIA_VOL, -1)
+                if (v >= 0) setMediaVolume(v)
+                return START_NOT_STICKY
+            }
             else -> return START_NOT_STICKY
         }
         return START_NOT_STICKY
+    }
+
+    private fun setMediaVolume(v: Int) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, v.coerceIn(0, max), 0)
+        } catch (_: Exception) {}
     }
 
     // ─────────────── شروع دوبله ───────────────

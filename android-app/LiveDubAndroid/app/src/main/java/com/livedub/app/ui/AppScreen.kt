@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -96,6 +97,9 @@ fun AppScreen(
     var lang by remember { mutableStateOf(prefs.getString("targetLang", "fa") ?: "fa") }
     var dubVol by remember { mutableStateOf((prefs.getFloat("dubVolume", 1.0f) * 100).toInt()) }
     var voiceChannel by remember { mutableStateOf(prefs.getBoolean("voiceChannel", false)) }
+    // ⭐ v2.4: ولوم رسانه (صدای اپ مبدأ) — زنده از AudioManager
+    var mediaVol by remember { mutableStateOf(activity.mediaVolume().first) }
+    val mediaVolMax = remember { activity.mediaVolume().second }
     var langMenuOpen by remember { mutableStateOf(false) }
 
     var status by remember { mutableStateOf(getStatus()) }
@@ -237,10 +241,25 @@ fun AppScreen(
 
                     Spacer(Modifier.height(13.dp))
 
-                    Text("صدای دوبله: ${faNum(dubVol)}٪", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    // ⭐ v2.4: اسلایدر صدای دوبله — تغییر زنده حین دوبله (بدون ری‌استارت)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.VolumeUp, null,
+                            Modifier.size(15.dp), tint = Emerald
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "صدای دوبله: ${faNum(dubVol)}٪",
+                            fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold
+                        )
+                    }
                     Slider(
                         value = dubVol.toFloat(),
-                        onValueChange = { dubVol = it.toInt(); persist() },
+                        onValueChange = {
+                            dubVol = it.toInt()
+                            persist()
+                            activity.setDubVolumeLive(dubVol / 100f) // ⭐ زنده
+                        },
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
                             activeTrackColor = Emerald,
@@ -248,11 +267,42 @@ fun AppScreen(
                         )
                     )
 
+                    // ⭐ v2.4: اسلایدر صدای اصلی — ولوم استریم رسانه (اپ مبدأ مثل یوتیوب)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.VolumeUp, null,
+                            Modifier.size(15.dp), tint = Color(0xFF7BD8A8)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "صدای اصلی (ولوم دستگاه): ${faNum(mediaVol)}",
+                            fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Slider(
+                        value = mediaVol.toFloat(),
+                        onValueChange = {
+                            mediaVol = it.toInt()
+                            activity.setMediaVolumeLive(mediaVol) // ⭐ زنده — روی اپ مبدأ اعمال می‌شود
+                        },
+                        valueRange = 0f..mediaVolMax.toFloat(),
+                        steps = (mediaVolMax - 1).coerceAtLeast(0),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF7BD8A8),
+                            activeTrackColor = Color(0xFF3FA97A),
+                            inactiveTrackColor = Color(0xFF24302D)
+                        )
+                    )
+                    Text(
+                        "صدای اصلی را کم کنید تا دوبله بهتر شنیده شود (اگر کانال مکالمه خاموش است، این اسلایدر صدای دوبله را هم کم می‌کند)",
+                        fontSize = 10.sp, color = TextMuted, lineHeight = 15.sp
+                    )
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("پخش دوبله روی کانال مکالمه", fontSize = 12.5.sp, color = Color(0xFFE8EFEC))
                             Text(
-                                "ولوم رسانه را کم کنید تا صدای اصلی کم شود",
+                                "با روشن‌کردنش، دو اسلایدر کاملاً مستقل می‌شوند (پیشنهادی)",
                                 fontSize = 10.5.sp, color = TextMuted
                             )
                         }
@@ -386,26 +436,7 @@ fun AppScreen(
                         }
                     }
 
-                    if (running && status.subtitles.isNotBlank()) {
-                        Spacer(Modifier.height(11.dp))
-                        Text("زیرنویس زنده", fontSize = 11.sp, color = TextMuted)
-                        Spacer(Modifier.height(6.dp))
-                        Surface(
-                            color = Color(0xFF0E1413),
-                            shape = RoundedCornerShape(11.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                status.subtitles,
-                                fontSize = 11.sp,
-                                color = Color(0xFFD1FAE5),
-                                lineHeight = 18.sp,
-                                modifier = Modifier
-                                    .padding(10.dp)
-                                    .height(120.dp)
-                            )
-                        }
-                    }
+                    // ⭐ v2.4: بخش زیرنویس حذف شد (به درخواست کاربر)
                 }
             }
 
@@ -423,13 +454,14 @@ fun AppScreen(
                     GuideLine("۲. به هر اپی بروید (یوتیوب، تلگرام، مرورگر و…) و ویدیو پخش کنید")
                     GuideLine("۳. دوبله فارسی از روی صدای همان اپ پخش می‌شود — حتی در پس‌زمینه با صفحه خاموش")
                     GuideLine("۴. سشن هر ~۱۳ دقیقه به‌صورت خودکار تمدید می‌شود؛ دیگر هیچ‌وقت قطع نمی‌شود")
-                    GuideLine("۵. برای شنیدن صدای اصلی کمتر: ولوم رسانه را کم کنید (با کانال مکالمه فعال)")
+                    GuideLine("۵. دو اسلایدر «صدای دوبله» و «صدای اصلی» را حین دوبله زنده تنظیم کنید — برای استقلال کامل، کانال مکالمه را روشن کنید")
+                    GuideLine("۶. اگر ویدیو شما ریلز/شورت با پخش خودکارِ تکراری است، دوبله هم همان بخش را تکرار می‌کند — با یک ویدیوی بلند (مثلاً یوتیوب ۱۰ دقیقه‌ای) تست کنید")
                 }
             }
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "LiveDub v2.3 · دوبله زنده با Gemini Live Translate",
+                "LiveDub v2.4 · دوبله زنده با Gemini Live Translate",
                 fontSize = 10.sp, color = TextMuted,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )

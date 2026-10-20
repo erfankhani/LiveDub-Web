@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -159,5 +160,30 @@ class MainActivity : ComponentActivity() {
     private fun launchProjectionConsent() {
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(mgr.createScreenCaptureIntent())
+    }
+
+    // ─────────────── ⭐ v2.4: کنترل زنده ولوم‌ها حین دوبله ───────────────
+
+    /** تغییر زنده گین صدای دوبله (0..1) — سرویس همان لحظه AudioTrack را تنظیم می‌کند */
+    fun setDubVolumeLive(v: Float) {
+        val i = Intent(this, LiveDubService::class.java)
+            .setAction(LiveDubService.ACTION_SET_DUB_VOLUME)
+            .putExtra(LiveDubService.EXTRA_DUB_VOL, v)
+        try { startService(i) } catch (_: Exception) {}
+    }
+
+    /** (ولوم فعلی رسانه، حداکثر) — برای مقداردهی اولیه اسلایدر صدای اصلی */
+    fun mediaVolume(): Pair<Int, Int> {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        return am.getStreamVolume(AudioManager.STREAM_MUSIC) to
+                am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    }
+
+    /** تغییر زنده «صدای اصلی» = ولوم استریم رسانه (اپ مبدأ مثل یوتیوب روی همین استریم پخش می‌کند) */
+    fun setMediaVolumeLive(v: Int) {
+        val i = Intent(this, LiveDubService::class.java)
+            .setAction(LiveDubService.ACTION_SET_MEDIA_VOLUME)
+            .putExtra(LiveDubService.EXTRA_MEDIA_VOL, v)
+        try { startService(i) } catch (_: Exception) {}
     }
 }

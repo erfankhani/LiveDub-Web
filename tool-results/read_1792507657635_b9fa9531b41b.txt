@@ -1,0 +1,650 @@
+     1→package com.livedub.app.ui
+     2→
+     3→import android.content.Context
+     4→import androidx.compose.animation.animateColorAsState
+     5→import androidx.compose.animation.core.LinearEasing
+     6→import androidx.compose.animation.core.RepeatMode
+     7→import androidx.compose.animation.core.animateFloat
+     8→import androidx.compose.animation.core.infiniteRepeatable
+     9→import androidx.compose.animation.core.rememberInfiniteTransition
+    10→import androidx.compose.animation.core.tween
+    11→import androidx.compose.foundation.Canvas
+    12→import androidx.compose.foundation.background
+    13→import androidx.compose.foundation.layout.Arrangement
+    14→import androidx.compose.foundation.layout.Box
+    15→import androidx.compose.foundation.layout.Column
+    16→import androidx.compose.foundation.layout.Row
+    17→import androidx.compose.foundation.layout.Spacer
+    18→import androidx.compose.foundation.layout.fillMaxSize
+    19→import androidx.compose.foundation.layout.fillMaxWidth
+    20→import androidx.compose.foundation.layout.height
+    21→import androidx.compose.foundation.layout.padding
+    22→import androidx.compose.foundation.layout.size
+    23→import androidx.compose.foundation.layout.width
+    24→import androidx.compose.foundation.rememberScrollState
+    25→import androidx.compose.foundation.shape.CircleShape
+    26→import androidx.compose.foundation.shape.RoundedCornerShape
+    27→import androidx.compose.foundation.verticalScroll
+    28→import androidx.compose.material.icons.Icons
+    29→import androidx.compose.material.icons.filled.KeyboardArrowDown
+    30→import androidx.compose.material.icons.filled.Mic
+    31→import androidx.compose.material.icons.filled.Pause
+    32→import androidx.compose.material.icons.filled.Visibility
+    33→import androidx.compose.material.icons.filled.VisibilityOff
+    34→import androidx.compose.material3.Button
+    35→import androidx.compose.material3.ButtonDefaults
+    36→import androidx.compose.material3.Card
+    37→import androidx.compose.material3.CardDefaults
+    38→import androidx.compose.material3.DropdownMenu
+    39→import androidx.compose.material3.DropdownMenuItem
+    40→import androidx.compose.material3.Icon
+    41→import androidx.compose.material3.IconButton
+    42→import androidx.compose.material3.MaterialTheme
+    43→import androidx.compose.material3.OutlinedTextField
+    44→import androidx.compose.material3.OutlinedTextFieldDefaults
+    45→import androidx.compose.material3.Slider
+    46→import androidx.compose.material3.SliderDefaults
+    47→import androidx.compose.material3.Surface
+    48→import androidx.compose.material3.Switch
+    49→import androidx.compose.material3.SwitchDefaults
+    50→import androidx.compose.material3.Text
+    51→import androidx.compose.runtime.Composable
+    52→import androidx.compose.runtime.LaunchedEffect
+    53→import androidx.compose.runtime.getValue
+    54→import androidx.compose.runtime.mutableStateOf
+    55→import androidx.compose.runtime.remember
+    56→import androidx.compose.runtime.setValue
+    57→import androidx.compose.ui.Alignment
+    58→import androidx.compose.ui.Modifier
+    59→import androidx.compose.ui.geometry.Offset
+    60→import androidx.compose.ui.graphics.Brush
+    61→import androidx.compose.ui.graphics.Color
+    62→import androidx.compose.ui.graphics.Path
+    63→import androidx.compose.ui.platform.LocalContext
+    64→import androidx.compose.ui.text.font.FontWeight
+    65→import androidx.compose.ui.unit.dp
+    66→import androidx.compose.ui.unit.sp
+    67→import com.livedub.app.MainActivity
+    68→import com.livedub.app.ui.theme.Amber
+    69→import com.livedub.app.ui.theme.Danger
+    70→import com.livedub.app.ui.theme.Emerald
+    71→import com.livedub.app.ui.theme.EmeraldLight
+    72→import com.livedub.app.ui.theme.TextMuted
+    73→import kotlinx.coroutines.delay
+    74→
+    75→private val LANGS = listOf(
+    76→    "fa" to "فارسی", "en" to "انگلیسی", "tr" to "ترکی", "ar" to "عربی",
+    77→    "es" to "اسپانیایی", "fr" to "فرانسوی", "de" to "آلمانی", "ru" to "روسی",
+    78→    "zh-Hans" to "چینی", "ja" to "ژاپنی", "ko" to "کره‌ای"
+    79→)
+    80→
+    81→private fun faNum(n: Int): String =
+    82→    n.toString().map { "۰۱۲۳۴۵۶۷۸۹"[Character.getNumericValue(it)] }.joinToString("")
+    83→
+    84→@Composable
+    85→fun AppScreen(
+    86→    activity: MainActivity,
+    87→    getStatus: () -> MainActivity.StatusSnapshot,
+    88→    registerStatusListener: ((MainActivity.StatusSnapshot) -> Unit) -> Unit,
+    89→    onToggle: () -> Unit
+    90→) {
+    91→    val context = LocalContext.current
+    92→    val prefs = remember { context.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE) }
+    93→
+    94→    var apiKey by remember { mutableStateOf(prefs.getString("apiKey", "") ?: "") }
+    95→    var showKey by remember { mutableStateOf(false) }
+    96→    var lang by remember { mutableStateOf(prefs.getString("targetLang", "fa") ?: "fa") }
+    97→    var dubVol by remember { mutableStateOf((prefs.getFloat("dubVolume", 1.0f) * 100).toInt()) }
+    98→    var voiceChannel by remember { mutableStateOf(prefs.getBoolean("voiceChannel", false)) }
+    99→    var langMenuOpen by remember { mutableStateOf(false) }
+   100→
+   101→    var status by remember { mutableStateOf(getStatus()) }
+   102→    LaunchedEffect(Unit) { registerStatusListener { status = it } }
+   103→
+   104→    // آخرین پیام غیرخالی (چون broadcast آمار پیام را خالی می‌کند)
+   105→    var lastMessage by remember { mutableStateOf("") }
+   106→    LaunchedEffect(status.message) {
+   107→        if (status.message.isNotBlank()) lastMessage = status.message
+   108→    }
+   109→
+   110→    // تایمر uptime
+   111→    var uptimeSec by remember { mutableStateOf(0) }
+   112→    val running = status.state == "dubbing" || status.state == "reconnecting"
+   113→    LaunchedEffect(status.startedAt, running) {
+   114→        while (running && status.startedAt > 0) {
+   115→            uptimeSec = ((System.currentTimeMillis() - status.startedAt) / 1000).toInt()
+   116→            delay(1000)
+   117→        }
+   118→        if (!running) uptimeSec = 0
+   119→    }
+   120→
+   121→    fun persist() {
+   122→        prefs.edit()
+   123→            .putString("apiKey", apiKey.trim())
+   124→            .putString("targetLang", lang)
+   125→            .putFloat("dubVolume", dubVol / 100f)
+   126→            .putBoolean("voiceChannel", voiceChannel)
+   127→            .apply()
+   128→    }
+   129→
+   130→    Box(
+   131→        Modifier
+   132→            .fillMaxSize()
+   133→            .background(
+   134→                Brush.verticalGradient(
+   135→                    listOf(Color(0xFF0B0F0E), Color(0xFF0D1512), Color(0xFF0B0F0E))
+   136→                )
+   137→            )
+   138→    ) {
+   139→        Column(
+   140→            Modifier
+   141→                .fillMaxSize()
+   142→                .verticalScroll(rememberScrollState())
+   143→                .padding(16.dp)
+   144→        ) {
+   145→            Header(running, status.state)
+   146→
+   147→            if (status.reconnecting) {
+   148→                Spacer(Modifier.height(10.dp))
+   149→                ReconnectBanner(status.message)
+   150→            }
+   151→            if ((status.state == "error" || status.warn == "error") && lastMessage.isNotBlank()) {
+   152→                Spacer(Modifier.height(10.dp))
+   153→                ErrorBanner(lastMessage)
+   154→            } else if (status.warn == "warn" && running) {
+   155→                Spacer(Modifier.height(10.dp))
+   156→                WarnBanner()
+   157→            }
+   158→
+   159→            Spacer(Modifier.height(14.dp))
+   160→
+   161→            // ── تنظیمات ──
+   162→            Card(
+   163→                colors = CardDefaults.cardColors(containerColor = Color(0xFF121716)),
+   164→                shape = RoundedCornerShape(16.dp),
+   165→            ) {
+   166→                Column(Modifier.padding(14.dp)) {
+   167→                    Text("کلید Gemini API", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+   168→                    Spacer(Modifier.height(7.dp))
+   169→                    OutlinedTextField(
+   170→                        value = apiKey,
+   171→                        onValueChange = { apiKey = it; persist() },
+   172→                        modifier = Modifier.fillMaxWidth(),
+   173→                        placeholder = { Text("AIzaSy…", color = TextMuted, fontSize = 13.sp) },
+   174→                        visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None
+   175→                        else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+   176→                        trailingIcon = {
+   177→                            IconButton(onClick = { showKey = !showKey }) {
+   178→                                Icon(
+   179→                                    if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+   180→                                    contentDescription = null,
+   181→                                    tint = TextMuted
+   182→                                )
+   183→                            }
+   184→                        },
+   185→                        singleLine = true,
+   186→                        shape = RoundedCornerShape(11.dp),
+   187→                        colors = OutlinedTextFieldDefaults.colors(
+   188→                            focusedBorderColor = Emerald,
+   189→                            unfocusedBorderColor = Color(0xFF24302D),
+   190→                            cursorColor = Emerald,
+   191→                            focusedTextColor = Color(0xFFE8EFEC),
+   192→                            unfocusedTextColor = Color(0xFFE8EFEC)
+   193→                        )
+   194→                    )
+   195→                    Spacer(Modifier.height(6.dp))
+   196→                    Text("کلید فقط روی دستگاه شما ذخیره می‌شود.", fontSize = 10.5.sp, color = TextMuted)
+   197→
+   198→                    Spacer(Modifier.height(13.dp))
+   199→
+   200→                    Text("زبان خروجی دوبله", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+   201→                    Spacer(Modifier.height(7.dp))
+   202→                    Box {
+   203→                        Surface(
+   204→                            shape = RoundedCornerShape(11.dp),
+   205→                            color = Color(0xFF182020),
+   206→                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF24302D)),
+   207→                            onClick = { langMenuOpen = true },
+   208→                            modifier = Modifier.fillMaxWidth()
+   209→                        ) {
+   210→                            Row(
+   211→                                Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+   212→                                horizontalArrangement = Arrangement.SpaceBetween
+   213→                            ) {
+   214→                                Text(LANGS.first { it.first == lang }.second, fontSize = 13.5.sp, color = Color(0xFFE8EFEC))
+   215→                                Icon(Icons.Default.KeyboardArrowDown, null, tint = TextMuted)
+   216→                            }
+   217→                        }
+   218→                        DropdownMenu(
+   219→                            expanded = langMenuOpen,
+   220→                            onDismissRequest = { langMenuOpen = false },
+   221→                            modifier = Modifier.background(Color(0xFF182020))
+   222→                        ) {
+   223→                            LANGS.forEach { (code, label) ->
+   224→                                DropdownMenuItem(
+   225→                                    text = {
+   226→                                        Text(
+   227→                                            label,
+   228→                                            color = if (code == lang) Emerald else Color(0xFFE8EFEC),
+   229→                                            fontSize = 13.5.sp
+   230→                                        )
+   231→                                    },
+   232→                                    onClick = { lang = code; persist(); langMenuOpen = false }
+   233→                                )
+   234→                            }
+   235→                        }
+   236→                    }
+   237→
+   238→                    Spacer(Modifier.height(13.dp))
+   239→
+   240→                    Text("صدای دوبله: ${faNum(dubVol)}٪", fontSize = 12.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+   241→                    Slider(
+   242→                        value = dubVol.toFloat(),
+   243→                        onValueChange = { dubVol = it.toInt(); persist() },
+   244→                        colors = SliderDefaults.colors(
+   245→                            thumbColor = Color.White,
+   246→                            activeTrackColor = Emerald,
+   247→                            inactiveTrackColor = Color(0xFF24302D)
+   248→                        )
+   249→                    )
+   250→
+   251→                    Row(verticalAlignment = Alignment.CenterVertically) {
+   252→                        Column(Modifier.weight(1f)) {
+   253→                            Text("پخش دوبله روی کانال مکالمه", fontSize = 12.5.sp, color = Color(0xFFE8EFEC))
+   254→                            Text(
+   255→                                "ولوم رسانه را کم کنید تا صدای اصلی کم شود",
+   256→                                fontSize = 10.5.sp, color = TextMuted
+   257→                            )
+   258→                        }
+   259→                        Switch(
+   260→                            checked = voiceChannel,
+   261→                            onCheckedChange = { voiceChannel = it; persist() },
+   262→                            colors = SwitchDefaults.colors(
+   263→                                checkedThumbColor = Color.White,
+   264→                                checkedTrackColor = Emerald
+   265→                            )
+   266→                        )
+   267→                    }
+   268→                }
+   269→            }
+   270→
+   271→            Spacer(Modifier.height(13.dp))
+   272→
+   273→            // ── دکمه ──
+   274→            Button(
+   275→                onClick = { persist(); onToggle() },
+   276→                modifier = Modifier
+   277→                    .fillMaxWidth()
+   278→                    .height(52.dp),
+   279→                shape = RoundedCornerShape(14.dp),
+   280→                colors = ButtonDefaults.buttonColors(
+   281→                    containerColor = if (running) Danger else Emerald,
+   282→                    contentColor = if (running) Color.White else Color(0xFF04110C)
+   283→                )
+   284→            ) {
+   285→                Icon(if (running) Icons.Default.Pause else Icons.Default.Mic, null, Modifier.size(19.dp))
+   286→                Spacer(Modifier.width(8.dp))
+   287→                Text(
+   288→                    if (running) "توقف دوبله" else "شروع دوبله (دسترسی ضبط صدا)",
+   289→                    fontSize = 14.5.sp, fontWeight = FontWeight.Bold
+   290→                )
+   291→            }
+   292→
+   293→            Spacer(Modifier.height(13.dp))
+   294→
+   295→            // ── وضعیت ──
+   296→            Card(
+   297→                colors = CardDefaults.cardColors(containerColor = Color(0xFF121716)),
+   298→                shape = RoundedCornerShape(16.dp)
+   299→            ) {
+   300→                Column(Modifier.padding(14.dp)) {
+   301→                    Row(verticalAlignment = Alignment.CenterVertically) {
+   302→                        Text("وضعیت", fontSize = 12.5.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+   303→                        Spacer(Modifier.weight(1f))
+   304→                        if (running) {
+   305→                            PulsingDot()
+   306→                            Spacer(Modifier.width(6.dp))
+   307→                        }
+   308→                        Text(
+   309→                            when {
+   310→                                status.reconnecting -> "اتصال مجدد…"
+   311→                                status.state == "dubbing" -> "در حال دوبله"
+   312→                                status.state == "starting" -> "آماده‌سازی…"
+   313→                                status.state == "error" -> "خطا"
+   314→                                else -> "غیرفعال"
+   315→                            },
+   316→                            fontSize = 12.sp,
+   317→                            fontWeight = FontWeight.Bold,
+   318→                            color = when {
+   319→                                status.reconnecting -> Amber
+   320→                                running -> Emerald
+   321→                                status.state == "error" -> Danger
+   322→                                else -> TextMuted
+   323→                            }
+   324→                        )
+   325→                    }
+   326→                    if (status.message.isNotBlank()) {
+   327→                        Spacer(Modifier.height(6.dp))
+   328→                        Text(status.message, fontSize = 11.sp, color = TextMuted, lineHeight = 17.sp)
+   329→                    }
+   330→
+   331→                    if (running) {
+   332→                        Spacer(Modifier.height(11.dp))
+   333→                        Row(Modifier.fillMaxWidth()) {
+   334→                            StatCell(faNum(uptimeSec / 60) + ":" + faNum(uptimeSec % 60).padStart(2, '۰'), "زمان دوبله", Modifier.weight(1f))
+   335→                            StatCell(faNum(status.rotations), "تمدید سشن", Modifier.weight(1f))
+   336→                            StatCell(faNum(status.reconnects), "اتصال مجدد", Modifier.weight(1f))
+   337→                        }
+   338→                        Spacer(Modifier.height(8.dp))
+   339→                        Row(Modifier.fillMaxWidth()) {
+   340→                            StatCell(faNum(status.sentKb) + " KB", "صدا ارسالی ↑", Modifier.weight(1f))
+   341→                            StatCell(faNum(status.recvKb) + " KB", "دوبله دریافتی ↓", Modifier.weight(1f))
+   342→                            StatCell(faNum(status.captureChunks), "چانک ضبط", Modifier.weight(1f))
+   343→                        }
+   344→
+   345→                        // ⭐⭐ نوار تشخیص زنده — هر مرحله خط لوله را جدا نشان می‌دهد
+   346→                        Spacer(Modifier.height(10.dp))
+   347→                        DiagStrip(
+   348→                            socketOpen = status.socketOpen,
+   349→                            setupOk = status.setupOk,
+   350→                            capturing = status.captureChunks > 0,
+   351→                            msgIn = status.msgIn
+   352→                        )
+   353→
+   354→                        // ⭐ متر زنده صدا ورودی — اگر صفر بماند یعنی کپچر صدا کار نمی‌کند
+   355→                        Spacer(Modifier.height(10.dp))
+   356→                        Text("سطح صدای ورودی از دستگاه", fontSize = 10.5.sp, color = TextMuted)
+   357→                        Spacer(Modifier.height(4.dp))
+   358→                        Box(
+   359→                            Modifier
+   360→                                .fillMaxWidth()
+   361→                                .height(7.dp)
+   362→                                .background(Color(0xFF1C2624), RoundedCornerShape(99.dp))
+   363→                        ) {
+   364→                            Box(
+   365→                                Modifier
+   366→                                    .fillMaxWidth(status.inputLevel.coerceIn(0f, 1f))
+   367→                                    .height(7.dp)
+   368→                                    .background(
+   369→                                        if (status.inputLevel > 0.004f) Emerald else Color(0xFF3B4A46),
+   370→                                        RoundedCornerShape(99.dp)
+   371→                                    )
+   372→                            )
+   373→                        }
+   374→                        if (status.captureChunks <= 0) {
+   375→                            Spacer(Modifier.height(3.dp))
+   376→                            Text(
+   377→                                "✕ ضبط صدا هیچ داده‌ای نخوانده — دوباره شروع کنید و «اشتراک صدا» را روشن کنید",
+   378→                                fontSize = 10.sp, color = Danger
+   379→                            )
+   380→                        } else if (status.inputLevel <= 0.004f) {
+   381→                            Spacer(Modifier.height(3.dp))
+   382→                            Text(
+   383→                                "⚠ ساکت — گزینه «اشتراک صدا» را در پنجره دسترسی روشن کنید",
+   384→                                fontSize = 10.sp, color = Amber
+   385→                            )
+   386→                        }
+   387→                    }
+   388→
+   389→                    if (running && status.subtitles.isNotBlank()) {
+   390→                        Spacer(Modifier.height(11.dp))
+   391→                        Text("زیرنویس زنده", fontSize = 11.sp, color = TextMuted)
+   392→                        Spacer(Modifier.height(6.dp))
+   393→                        Surface(
+   394→                            color = Color(0xFF0E1413),
+   395→                            shape = RoundedCornerShape(11.dp),
+   396→                            modifier = Modifier.fillMaxWidth()
+   397→                        ) {
+   398→                            Text(
+   399→                                status.subtitles,
+   400→                                fontSize = 11.sp,
+   401→                                color = Color(0xFFD1FAE5),
+   402→                                lineHeight = 18.sp,
+   403→                                modifier = Modifier
+   404→                                    .padding(10.dp)
+   405→                                    .height(120.dp)
+   406→                            )
+   407→                        }
+   408→                    }
+   409→                }
+   410→            }
+   411→
+   412→            Spacer(Modifier.height(13.dp))
+   413→
+   414→            // ── راهنما ──
+   415→            Card(
+   416→                colors = CardDefaults.cardColors(containerColor = Color(0xFF121716)),
+   417→                shape = RoundedCornerShape(16.dp)
+   418→            ) {
+   419→                Column(Modifier.padding(14.dp)) {
+   420→                    Text("چطور کار می‌کند؟", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE8EFEC))
+   421→                    Spacer(Modifier.height(8.dp))
+   422→                    GuideLine("۱. روی «شروع دوبله» بزنید و در پنجره دسترسی، حتماً گزینه «اشتراک صدا / Share device audio» را روشن کنید")
+   423→                    GuideLine("۲. به هر اپی بروید (یوتیوب، تلگرام، مرورگر و…) و ویدیو پخش کنید")
+   424→                    GuideLine("۳. دوبله فارسی از روی صدای همان اپ پخش می‌شود — حتی در پس‌زمینه با صفحه خاموش")
+   425→                    GuideLine("۴. سشن هر ~۱۳ دقیقه به‌صورت خودکار تمدید می‌شود؛ دیگر هیچ‌وقت قطع نمی‌شود")
+   426→                    GuideLine("۵. برای شنیدن صدای اصلی کمتر: ولوم رسانه را کم کنید (با کانال مکالمه فعال)")
+   427→                }
+   428→            }
+   429→
+   430→            Spacer(Modifier.height(20.dp))
+   431→            Text(
+   432→                "LiveDub v2.3 · دوبله زنده با Gemini Live Translate",
+   433→                fontSize = 10.sp, color = TextMuted,
+   434→                modifier = Modifier.align(Alignment.CenterHorizontally)
+   435→            )
+   436→            Spacer(Modifier.height(8.dp))
+   437→        }
+   438→    }
+   439→}
+   440→
+   441→@Composable
+   442→private fun Header(running: Boolean, state: String) {
+   443→    Row(verticalAlignment = Alignment.CenterVertically) {
+   444→        Surface(
+   445→            shape = RoundedCornerShape(13.dp),
+   446→            color = Color.Transparent
+   447→        ) {
+   448→            Box(
+   449→                Modifier
+   450→                    .size(44.dp)
+   451→                    .background(
+   452→                        Brush.linearGradient(listOf(Emerald, EmeraldLight)),
+   453→                        RoundedCornerShape(13.dp)
+   454→                    ),
+   455→                contentAlignment = Alignment.Center
+   456→            ) {
+   457→                Icon(Icons.Default.Mic, null, tint = Color(0xFF04110C), modifier = Modifier.size(24.dp))
+   458→            }
+   459→        }
+   460→        Spacer(Modifier.width(10.dp))
+   461→        Column(Modifier.weight(1f)) {
+   462→            Text("LiveDub", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFE8EFEC))
+   463→            Text("دوبله زنده با Gemini · v2.3", fontSize = 11.sp, color = TextMuted)
+   464→        }
+   465→        Surface(
+   466→            shape = RoundedCornerShape(99.dp),
+   467→            color = Color(0xFF182020),
+   468→            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF24302D))
+   469→        ) {
+   470→            Row(
+   471→                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+   472→                verticalAlignment = Alignment.CenterVertically
+   473→            ) {
+   474→                Box(
+   475→                    Modifier
+   476→                        .size(7.dp)
+   477→                        .background(
+   478→                            when {
+   479→                                running -> Emerald
+   480→                                state == "error" -> Danger
+   481→                                else -> Color(0xFF64748B)
+   482→                            }, CircleShape
+   483→                        )
+   484→                )
+   485→                Spacer(Modifier.width(6.dp))
+   486→                Text(
+   487→                    when {
+   488→                        running -> "فعال"
+   489→                        state == "error" -> "خطا"
+   490→                        else -> "غیرفعال"
+   491→                    },
+   492→                    fontSize = 11.sp, color = TextMuted
+   493→                )
+   494→            }
+   495→        }
+   496→    }
+   497→}
+   498→
+   499→@Composable
+   500→private fun DiagStrip(socketOpen: Boolean, setupOk: Boolean, capturing: Boolean, msgIn: Int) {
+   501→    Surface(
+   502→        shape = RoundedCornerShape(11.dp),
+   503→        color = Color(0xFF0E1413),
+   504→        modifier = Modifier.fillMaxWidth()
+   505→    ) {
+   506→        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+   507→            Row(
+   508→                Modifier.fillMaxWidth(),
+   509→                horizontalArrangement = Arrangement.SpaceBetween,
+   510→                verticalAlignment = Alignment.CenterVertically
+   511→            ) {
+   512→                DiagChip("سوکت", socketOpen, "وصل", "قطع")
+   513→                DiagChip("تأیید سرور", setupOk, "دریافت شد", "در انتظار…")
+   514→            }
+   515→            Spacer(Modifier.height(7.dp))
+   516→            Row(
+   517→                Modifier.fillMaxWidth(),
+   518→                horizontalArrangement = Arrangement.SpaceBetween,
+   519→                verticalAlignment = Alignment.CenterVertically
+   520→            ) {
+   521→                DiagChip("ضبط صدا", capturing, "فعال", "بدون داده")
+   522→                DiagChipMsg(msgIn)
+   523→            }
+   524→        }
+   525→    }
+   526→}
+   527→
+   528→@Composable
+   529→private fun DiagChipMsg(msgIn: Int) {
+   530→    val ok = msgIn > 0
+   531→    val color = if (ok) Emerald else Danger
+   532→    Row(verticalAlignment = Alignment.CenterVertically) {
+   533→        Box(
+   534→            Modifier
+   535→                .size(7.dp)
+   536→                .background(color, CircleShape)
+   537→        )
+   538→        Spacer(Modifier.width(5.dp))
+   539→        Column {
+   540→            Text("پیام سرور", fontSize = 9.sp, color = TextMuted)
+   541→            Text(
+   542→                if (ok) "✓ " + faNum(msgIn) + " پیام" else "✕ صفر",
+   543→                fontSize = 10.sp,
+   544→                color = color,
+   545→                fontWeight = FontWeight.SemiBold
+   546→            )
+   547→        }
+   548→    }
+   549→}
+   550→
+   551→@Composable
+   552→private fun DiagChip(label: String, ok: Boolean, okText: String, badText: String) {
+   553→    val color = if (ok) Emerald else if (label == "تأیید سرور") Amber else Danger
+   554→    Row(verticalAlignment = Alignment.CenterVertically) {
+   555→        Box(
+   556→            Modifier
+   557→                .size(7.dp)
+   558→                .background(color, CircleShape)
+   559→        )
+   560→        Spacer(Modifier.width(5.dp))
+   561→        Column {
+   562→            Text(label, fontSize = 9.sp, color = TextMuted)
+   563→            Text(
+   564→                if (ok) "✓ $okText" else if (label == "تأیید سرور") "⏳ $badText" else "✕ $badText",
+   565→                fontSize = 10.sp,
+   566→                color = color,
+   567→                fontWeight = FontWeight.SemiBold
+   568→            )
+   569→        }
+   570→    }
+   571→}
+   572→
+   573→@Composable
+   574→private fun PulsingDot() {
+   575→    val transition = rememberInfiniteTransition(label = "pulse")
+   576→    val alpha by transition.animateFloat(
+   577→        initialValue = 1f, targetValue = 0.25f,
+   578→        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+   579→        label = "alpha"
+   580→    )
+   581→    Box(
+   582→        Modifier
+   583→            .size(9.dp)
+   584→            .background(Emerald.copy(alpha = alpha), CircleShape)
+   585→    )
+   586→}
+   587→
+   588→@Composable
+   589→private fun StatCell(value: String, label: String, modifier: Modifier = Modifier) {
+   590→    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+   591→        Text(value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = EmeraldLight)
+   592→        Text(label, fontSize = 9.5.sp, color = TextMuted)
+   593→    }
+   594→}
+   595→
+   596→@Composable
+   597→private fun GuideLine(text: String) {
+   598→    Row(Modifier.padding(vertical = 3.dp)) {
+   599→        Text("•", color = Emerald, fontSize = 11.sp)
+   600→        Spacer(Modifier.width(6.dp))
+   601→        Text(text, fontSize = 11.sp, color = TextMuted, lineHeight = 17.sp)
+   602→    }
+   603→}
+   604→
+   605→@Composable
+   606→private fun ReconnectBanner(message: String) {
+   607→    Surface(
+   608→        shape = RoundedCornerShape(11.dp),
+   609→        color = Amber.copy(alpha = 0.10f),
+   610→        border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f)),
+   611→        modifier = Modifier.fillMaxWidth()
+   612→    ) {
+   613→        Text("⟳ $message", fontSize = 11.5.sp, color = Amber, modifier = Modifier.padding(9.dp))
+   614→    }
+   615→}
+   616→
+   617→@Composable
+   618→private fun WarnBanner() {
+   619→    Surface(
+   620→        shape = RoundedCornerShape(11.dp),
+   621→        color = Amber.copy(alpha = 0.10f),
+   622→        border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.35f)),
+   623→        modifier = Modifier.fillMaxWidth()
+   624→    ) {
+   625→        Column(Modifier.padding(10.dp)) {
+   626→            Text(
+   627→                "⚠ صدای ورودی ساکت است!",
+   628→                fontSize = 12.sp, color = Amber, fontWeight = FontWeight.Bold
+   629→            )
+   630→            Spacer(Modifier.height(3.dp))
+   631→            Text(
+   632→                "در پنجره اجازه ضبط، گزینه «اشتراک صدا / Share device audio» را روشن کنید و ولوم اپ مقصد (مثلاً یوتیوب) را بالا ببرید.",
+   633→                fontSize = 11.sp, color = Amber.copy(alpha = 0.85f), lineHeight = 17.sp
+   634→            )
+   635→        }
+   636→    }
+   637→}
+   638→
+   639→@Composable
+   640→private fun ErrorBanner(message: String) {
+   641→    Surface(
+   642→        shape = RoundedCornerShape(11.dp),
+   643→        color = Danger.copy(alpha = 0.09f),
+   644→        border = androidx.compose.foundation.BorderStroke(1.dp, Danger.copy(alpha = 0.25f)),
+   645→        modifier = Modifier.fillMaxWidth()
+   646→    ) {
+   647→        Text("⚠ $message", fontSize = 11.5.sp, color = Danger, modifier = Modifier.padding(9.dp))
+   648→    }
+   649→}
+   650→

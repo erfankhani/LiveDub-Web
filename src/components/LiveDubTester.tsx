@@ -20,6 +20,7 @@ import {
   BadgeCheck,
   CircleStop,
   Copy,
+  ExternalLink,
   Eye,
   EyeOff,
   Info,
@@ -108,18 +109,21 @@ type EngineCallbacks = {
   onLog: (kind: LogLine["kind"], msg: string) => void;
   onTranscript: (dir: "in" | "out", text: string) => void;
   onStopped: (reason: string) => void;
+  /** ⭐ مرورگر/ایفریم اجازه ضبط نمی‌دهد (مثل permissions policy پنل Preview) */
+  onPermissionIssue: (msg: string) => void;
 };
 
 class DubEngine {
   private apiKey: string;
   private targetLang: string;
-  private source: "tab" | "mic";
+  private source: "tab" | "mic" | "demo";
   private cbs: EngineCallbacks;
 
   private running = false;
   private stream: MediaStream | null = null;
   private captureCtx: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
+  private demoSource: AudioBufferSourceNode | null = null;
   private playbackCtx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
@@ -140,7 +144,7 @@ class DubEngine {
   private serverError = "";
   private lastLevelPush = 0;
 
-  constructor(apiKey: string, targetLang: string, source: "tab" | "mic", cbs: EngineCallbacks) {
+  constructor(apiKey: string, targetLang: string, source: "tab" | "mic" | "demo", cbs: EngineCallbacks) {
     this.apiKey = apiKey;
     this.targetLang = targetLang;
     this.source = source;
@@ -156,6 +160,8 @@ class DubEngine {
     try {
       // ۱) گرفتن صدا
       if (this.source === "tab") {
+        // ⭐ چک پیش‌گیرانه — داخل ایفریم پنل Preview، feature display-capture بلاک است
+        await this.assertDisplayCaptureAllowed();
         this.stream = await navigator.mediaDevices.getDisplayMedia({
           video: true, // برای اشتراک تب لازم است؛ فقط از ویدیو استفاده نمی‌کنیم
           audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -174,11 +180,13 @@ class DubEngine {
           })
         );
         this.cbs.onLog("ok", "صدای تب گرفته شد ✓");
-      } else {
+      } else if (this.source === "mic") {
         this.stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         });
         this.cbs.onLog("ok", "میکروفون فعال شد ✓");
+      } else {
+        this.cbs.onLog("info", "حالت دمو — بدون نیاز به هیچ اجازه‌ای؛ کل پروتکل واقعاً به Gemini وصل می‌شود");
       }
 
       // ۲) کانتکست پخش 24kHz برای صدای دوبله
@@ -197,13 +205,18 @@ class DubEngine {
       if (this.captureCtx.state === "suspended") await this.captureCtx.resume();
       await this.captureCtx.audioWorklet.addModule("/livedub-pcm-processor.js");
 
-      const srcNode = this.captureCtx.createMediaStreamSource(this.stream);
       this.workletNode = new AudioWorkletNode(this.captureCtx, "livedub-pcm");
       this.workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
         if (!this.running) return;
         this.handleAudioChunk(e.data);
       };
-      srcNode.connect(this.workletNode);
+
+      if (this.source === "demo") {
+        await this.startDemoSource();
+      } else if (this.stream) {
+        const srcNode = this.captureCtx.createMediaStreamSource(this.stream);
+        srcNode.connect(this.workletNode);
+      }
       const silent = this.captureCtx.createGain();
       silent.gain.value = 0;
       this.workletNode.connect(silent);
@@ -218,10 +231,54 @@ class DubEngine {
       this.scheduleRotation();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (this.isPermissionsPolicyError(err)) {
+        this.cbs.onPermissionIssue(msg);
+      }
       this.cbs.onLog("error", msg);
       this.cbs.onStats({ phase: "error", message: msg, serverError: msg });
       this.stop();
     }
+  }
+
+  /** ⭐ تشخیص خطای Permissions-Policy (مثلاً display-capture بلاک‌شده در ایفریم) */
+  private isPermissionsPolicyError(err: unknown): boolean {
+    const m = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+    return /permissions\s*policy|display-capture|NotAllowedError/i.test(m);
+  }
+
+  /** چک پیش‌گیرانه قبل از getDisplayMedia تا پیام خطا مفهوم و راهنما مشخص باشد */
+  private async assertDisplayCaptureAllowed() {
+    try {
+      const st = await navigator.permissions.query({ name: "display-capture" as PermissionName });
+      if (st.state === "denied") {
+        throw new Error(
+          'Failed to execute getDisplayMedia: Access to the feature "display-capture" is disallowed by permissions policy.'
+        );
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("display-capture")) throw e;
+      // query در این مرورگر پشتیبانی نمی‌شود → بگذارید خود getDisplayMedia جواب دهد
+    }
+  }
+
+  /** ⭐ منبع دمو: نمونه گفتار فارسی (16kHz) به‌صورت loop وارد همان خط لوله می‌شود */
+  private async startDemoSource() {
+    const ctx = this.captureCtx;
+    if (!ctx || !this.workletNode) return;
+    const resp = await fetch("/livedub-demo-speech.wav");
+    if (!resp.ok) throw new Error("فایل نمونه دمو یافت نشد");
+    const arr = await resp.arrayBuffer();
+    const buf = await ctx.decodeAudioData(arr);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(this.workletNode);
+    src.start();
+    this.demoSource = src;
+    this.cbs.onLog(
+      "ok",
+      "نمونه گفتار فارسی وارد موتور شد ✓ — دوبله از بلندگو پخش می‌شود (برای شنیدن ترجمه، زبان خروجی را انگلیسی بگذارید)"
+    );
   }
 
   // ── توقف ──
@@ -256,6 +313,14 @@ class DubEngine {
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.workletNode = null;
+    if (this.demoSource) {
+      try {
+        this.demoSource.stop();
+      } catch {
+        /* ignore */
+      }
+      this.demoSource = null;
+    }
     try {
       this.captureCtx?.close();
     } catch {
@@ -632,7 +697,8 @@ export default function LiveDubTester() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [lang, setLang] = useState("fa");
-  const [source, setSource] = useState<"tab" | "mic">("tab");
+  const [source, setSource] = useState<"tab" | "mic" | "demo">("tab");
+  const [captureBlocked, setCaptureBlocked] = useState("");
 
   const [stats, setStats] = useState<Stats>(INITIAL_STATS);
   const [logs, setLogs] = useState<LogLine[]>([]);
@@ -715,6 +781,7 @@ export default function LiveDubTester() {
       engineRef.current = null;
     }
     setSubs([]);
+    setCaptureBlocked("");
     setStats({ ...INITIAL_STATS });
     startedAtRef.current = Date.now();
 
@@ -722,6 +789,10 @@ export default function LiveDubTester() {
       onStats: (patch) => setStats((s) => ({ ...s, ...patch })),
       onLog: pushLog,
       onTranscript: pushTranscript,
+      onPermissionIssue: (msg) => {
+        pushLog("warn", "مرورگر اجازه ضبط صفحه نداد — از بنر راهنما استفاده کنید یا حالت دمو را امتحان کنید");
+        setCaptureBlocked(msg);
+      },
       onStopped: (reason) => {
         pushLog("warn", reason);
         setStats((s) => ({ ...s, message: reason }));
@@ -822,19 +893,20 @@ export default function LiveDubTester() {
           <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-200/70">
             <Mic className="h-3.5 w-3.5" /> منبع صدا
           </label>
-          <div className="grid h-11 grid-cols-2 overflow-hidden rounded-md border border-white/10 bg-black/40 p-1">
+          <div className="grid h-11 grid-cols-3 overflow-hidden rounded-md border border-white/10 bg-black/40 p-1">
             {(
               [
-                ["tab", "صدای تب/سیستم"],
+                ["tab", "صدای تب"],
                 ["mic", "میکروفون"],
-              ] as Array<["tab" | "mic", string]>
+                ["demo", "دمو"],
+              ] as Array<["tab" | "mic" | "demo", string]>
             ).map(([val, label]) => (
               <button
                 key={val}
                 type="button"
                 disabled={running}
                 onClick={() => setSource(val)}
-                className={`rounded-[5px] text-[12px] font-bold transition-colors disabled:opacity-60 ${
+                className={`rounded-[5px] px-1 text-[11.5px] font-bold transition-colors disabled:opacity-60 ${
                   source === val
                     ? "bg-emerald-500 text-[#04110c]"
                     : "text-emerald-100/60 hover:text-emerald-100"
@@ -899,17 +971,61 @@ export default function LiveDubTester() {
         </div>
       )}
 
+      {/* ── ⭐ بنر Permissions-Policy: پیش‌نمایش داخل چت اجازه ضبط صفحه نمی‌دهد ── */}
+      {captureBlocked && (
+        <div className="mt-3 rounded-xl border border-amber-400/35 bg-amber-400/10 px-4 py-3 text-[12.5px] leading-6 text-amber-200">
+          <p className="font-bold">⚠ پیش‌نمایشِ داخل چت اجازه ضبط صفحه (display-capture) را نمی‌دهد</p>
+          <p className="mt-1 text-amber-200/80">
+            این محدودیت پنل پیش‌نمایش است، نه باگ. دو راه‌حل:
+            <b> ۱)</b> صفحه را در تب جدید باز کنید (ضبط تب آنجا کاملاً کار می‌کند)، یا
+            <b> ۲)</b> منبع صدا را روی «دمو» بگذارید — کل خط لوله با نمونه گفتار فارسی واقعاً به Gemini وصل می‌شود و ترجمه پخش می‌کند.
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <Button
+              onClick={() => window.open(window.location.href, "_blank")}
+              size="sm"
+              className="h-9 rounded-lg bg-amber-400 px-4 font-bold text-[#241a00] hover:bg-amber-300"
+            >
+              <ExternalLink className="me-2 h-4 w-4" />
+              باز کردن در تب جدید
+            </Button>
+            <Button
+              onClick={() => {
+                setSource("demo");
+                setCaptureBlocked("");
+              }}
+              size="sm"
+              variant="outline"
+              className="h-9 rounded-lg border-amber-400/40 bg-transparent px-4 font-bold text-amber-200 hover:bg-amber-400/10 hover:text-amber-100"
+            >
+              <Sparkles className="me-2 h-4 w-4" />
+              رفتن به حالت دمو
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ── راهنمای تست ── */}
       {!running && stats.phase !== "error" && (
         <div className="mt-4 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3">
           <p className="flex items-start gap-2 text-[12px] leading-6 text-emerald-100/65">
             <Info className="mt-1 h-4 w-4 shrink-0 text-emerald-400" />
             <span>
-              <b className="text-emerald-200">راهنمای تست:</b> کلید رایگان را از{" "}
-              <span dir="ltr" className="text-emerald-300">aistudio.google.com</span> بگیرید → «شروع دوبله» را بزنید → در
-              پنجره اشتراک، تب <b>یک تب کروم</b> را انتخاب کرده و <b className="text-emerald-300">گزینه اشتراک صدا را فعال</b> کنید →
-              در همان تب یوتیوب پخش کنید؛ صدای دوبله از همین صفحه پخش می‌شود. اگر مرورگر اجازه نداد، صفحه را با دکمه
-              «Open in New Tab» بالای پنل باز کنید. 🔒 کلید فقط در مرورگر شما ذخیره می‌شود.
+              {source === "demo" ? (
+                <>
+                  <b className="text-emerald-200">حالت دمو:</b> کلید API را وارد کنید → «شروع دوبله زنده» را بزنید؛ نمونه گفتار فارسی
+                  بدون هیچ اجازه‌ای وارد موتور می‌شود و همان پروتکل اپ اندروید را اجرا می‌کند. برای شنیدن ترجمه،
+                  زبان خروجی را <b className="text-emerald-300">انگلیسی</b> بگذارید — صدای دوبله از بلندگو پخش می‌شود. اگر دوبله شنیدید یعنی کلید و پروتکل سالم‌اند و مشکل اپ اندروید فقط در مرحله ضبط صدا است.
+                </>
+              ) : (
+                <>
+                  <b className="text-emerald-200">راهنمای تست:</b> کلید رایگان را از{" "}
+                  <span dir="ltr" className="text-emerald-300">aistudio.google.com</span> بگیرید → «شروع دوبله» را بزنید → در
+                  پنجره اشتراک، تب <b>یک تب کروم</b> را انتخاب کرده و <b className="text-emerald-300">گزینه اشتراک صدا را فعال</b> کنید →
+                  در همان تب یوتیوب پخش کنید؛ صدای دوبله از همین صفحه پخش می‌شود. اگر «اجازه ضبط» ندادید، صفحه را با دکمه
+                  «Open in New Tab» بالای پنل باز کنید یا از حالت دمو استفاده کنید. 🔒 کلید فقط در مرورگر شما ذخیره می‌شود.
+                </>
+              )}
             </span>
           </p>
         </div>

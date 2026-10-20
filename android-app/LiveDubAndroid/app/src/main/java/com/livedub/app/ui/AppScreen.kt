@@ -339,7 +339,16 @@ fun AppScreen(
                         Row(Modifier.fillMaxWidth()) {
                             StatCell(faNum(status.sentKb) + " KB", "صدا ارسالی ↑", Modifier.weight(1f))
                             StatCell(faNum(status.recvKb) + " KB", "دوبله دریافتی ↓", Modifier.weight(1f))
+                            StatCell(faNum(status.captureChunks), "چانک ضبط", Modifier.weight(1f))
                         }
+
+                        // ⭐⭐ نوار تشخیص زنده — هر مرحله خط لوله را جدا نشان می‌دهد
+                        Spacer(Modifier.height(10.dp))
+                        DiagStrip(
+                            socketOpen = status.socketOpen,
+                            setupOk = status.setupOk,
+                            capturing = status.captureChunks > 0
+                        )
 
                         // ⭐ متر زنده صدا ورودی — اگر صفر بماند یعنی کپچر صدا کار نمی‌کند
                         Spacer(Modifier.height(10.dp))
@@ -361,7 +370,13 @@ fun AppScreen(
                                     )
                             )
                         }
-                        if (status.inputLevel <= 0.004f) {
+                        if (status.captureChunks <= 0) {
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                "✕ ضبط صدا هیچ داده‌ای نخوانده — دوباره شروع کنید و «اشتراک صدا» را روشن کنید",
+                                fontSize = 10.sp, color = Danger
+                            )
+                        } else if (status.inputLevel <= 0.004f) {
                             Spacer(Modifier.height(3.dp))
                             Text(
                                 "⚠ ساکت — گزینه «اشتراک صدا» را در پنجره دسترسی روشن کنید",
@@ -413,7 +428,7 @@ fun AppScreen(
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "LiveDub v1.0 · دوبله زنده با Gemini Live Translate",
+                "LiveDub v2.2 · دوبله زنده با Gemini Live Translate",
                 fontSize = 10.sp, color = TextMuted,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
@@ -444,7 +459,7 @@ private fun Header(running: Boolean, state: String) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text("LiveDub", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFE8EFEC))
-            Text("دوبله زنده با Gemini · v1.0", fontSize = 11.sp, color = TextMuted)
+            Text("دوبله زنده با Gemini · v2.2", fontSize = 11.sp, color = TextMuted)
         }
         Surface(
             shape = RoundedCornerShape(99.dp),
@@ -476,6 +491,47 @@ private fun Header(running: Boolean, state: String) {
                     fontSize = 11.sp, color = TextMuted
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun DiagStrip(socketOpen: Boolean, setupOk: Boolean, capturing: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(11.dp),
+        color = Color(0xFF0E1413),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            DiagChip("سوکت", socketOpen, "وصل", "قطع")
+            DiagChip("تأیید سرور", setupOk, "دریافت شد", "در انتظار…")
+            DiagChip("ضبط صدا", capturing, "فعال", "بدون داده")
+        }
+    }
+}
+
+@Composable
+private fun DiagChip(label: String, ok: Boolean, okText: String, badText: String) {
+    val color = if (ok) Emerald else if (label == "تأیید سرور") Amber else Danger
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .background(color, CircleShape)
+        )
+        Spacer(Modifier.width(5.dp))
+        Column {
+            Text(label, fontSize = 9.sp, color = TextMuted)
+            Text(
+                if (ok) "✓ $okText" else if (label == "تأیید سرور") "⏳ $badText" else "✕ $badText",
+                fontSize = 10.sp,
+                color = color,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }

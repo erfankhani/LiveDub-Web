@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var projectionLauncher: ActivityResultLauncher<Intent>
     private lateinit var notifPermissionLauncher: ActivityResultLauncher<String>
+    private lateinit var recordAudioLauncher: ActivityResultLauncher<String>
 
     // وضعیت UI
     private var onStatus: ((StatusSnapshot) -> Unit)? = null
@@ -42,7 +43,10 @@ class MainActivity : ComponentActivity() {
         val sentKb: Int = 0,
         val recvKb: Int = 0,
         val inputLevel: Float = 0f,
-        val warn: String = "none"
+        val warn: String = "none",
+        val captureChunks: Int = 0,
+        val setupOk: Boolean = false,
+        val socketOpen: Boolean = false
     )
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -59,7 +63,10 @@ class MainActivity : ComponentActivity() {
                 sentKb = intent.getIntExtra(LiveDubService.EXTRA_SENT_KB, 0),
                 recvKb = intent.getIntExtra(LiveDubService.EXTRA_RECV_KB, 0),
                 inputLevel = intent.getFloatExtra(LiveDubService.EXTRA_INPUT_LEVEL, 0f),
-                warn = intent.getStringExtra(LiveDubService.EXTRA_WARN) ?: "none"
+                warn = intent.getStringExtra(LiveDubService.EXTRA_WARN) ?: "none",
+                captureChunks = intent.getIntExtra(LiveDubService.EXTRA_CAPTURE_CHUNKS, 0),
+                setupOk = intent.getBooleanExtra(LiveDubService.EXTRA_SETUP_OK, false),
+                socketOpen = intent.getBooleanExtra(LiveDubService.EXTRA_SOCKET_OPEN, false)
             )
             onStatus?.invoke(snap)
         }
@@ -82,6 +89,12 @@ class MainActivity : ComponentActivity() {
         }
 
         notifPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { requestRecordAudioThenConsent() }
+
+        // ⭐ بعضی گوشی‌ها (مخصوصاً سامسونگ) بدون RECORD_AUDIO گزینه «اشتراک صدا»
+        // را در پنجره ضبط نشان نمی‌دهند. اگر رد شد هم ادامه می‌دهیم (الزام نیست).
+        recordAudioLauncher = registerForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { launchProjectionConsent() }
 
@@ -123,11 +136,19 @@ class MainActivity : ComponentActivity() {
             startService(stop)
             return
         }
-        // اجازه نوتیفیکیشن (API 33+) سپس رضایت MediaProjection
+        // اجازه نوتیفیکیشن (API 33+) → اجازه ضبط میکروفون (برای نمایش تاگل اشتراک صدا) → رضایت MediaProjection
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            requestRecordAudioThenConsent()
+        }
+    }
+
+    private fun requestRecordAudioThenConsent() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
         } else {
             launchProjectionConsent()
         }

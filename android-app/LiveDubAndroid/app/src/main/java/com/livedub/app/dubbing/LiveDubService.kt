@@ -48,6 +48,9 @@ class LiveDubService : Service() {
         const val EXTRA_RECV_KB = "recvKb"          // ⭐ دیاگنوستیک: KB صدای دوبله دریافتی
         const val EXTRA_INPUT_LEVEL = "inputLevel"  // ⭐ دیاگنوستیک: سطح صدا ورودی 0..1
         const val EXTRA_WARN = "warn"               // none | warn | error
+        const val EXTRA_CAPTURE_CHUNKS = "captureChunks" // ⭐ دیاگنوستیک: چانک‌های خوانده‌شده ضبط
+        const val EXTRA_SETUP_OK = "setupOk"        // ⭐ دیاگنوستیک: setupComplete دریافت شد؟
+        const val EXTRA_SOCKET_OPEN = "socketOpen"  // ⭐ دیاگنوستیک: سوکت باز است؟
 
         private const val CHANNEL_ID = "livedub_service"
         private const val NOTIF_ID = 1001
@@ -414,6 +417,9 @@ class LiveDubService : Service() {
         i.putExtra(EXTRA_SENT_KB, ((c?.sentBytes ?: 0L) / 1024L).toInt())
         i.putExtra(EXTRA_RECV_KB, ((c?.recvAudioBytes ?: 0L) / 1024L).toInt())
         i.putExtra(EXTRA_INPUT_LEVEL, lastInputLevel)
+        i.putExtra(EXTRA_CAPTURE_CHUNKS, (capture?.chunksRead ?: 0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        i.putExtra(EXTRA_SETUP_OK, c?.isSetupComplete ?: false)
+        i.putExtra(EXTRA_SOCKET_OPEN, c?.isOpen ?: false)
         sendBroadcast(i)
     }
 

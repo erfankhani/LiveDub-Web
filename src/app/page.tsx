@@ -117,7 +117,7 @@ export default function Home() {
           </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-[15px] font-extrabold tracking-tight">LiveDub</h1>
-            <p className="text-[11px] text-emerald-200/50">دوبله زنده با Gemini · v2.0</p>
+            <p className="text-[11px] text-emerald-200/50">دوبله زنده با Gemini · v2.2</p>
           </div>
           <Badge className="hidden sm:inline-flex bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 hover:bg-emerald-500/15 rounded-full px-3">
             <Wrench className="w-3 h-3 me-1.5" /> باگ ۱۵ دقیقه رفع شد
@@ -456,14 +456,14 @@ export default function Home() {
                       <Smartphone className="w-6 h-6 text-emerald-300" />
                     </span>
                     <div>
-                      <h4 className="font-extrabold text-[16px]">سورس اندروید — Kotlin + Compose · v2.1</h4>
-                      <p className="text-[11px] text-emerald-100/50">ZIP · {formatFa("350")} کیلوبایت</p>
+                      <h4 className="font-extrabold text-[16px]">سورس اندروید — Kotlin + Compose · v2.2</h4>
+                      <p className="text-[11px] text-emerald-100/50">ZIP · {formatFa("398")} کیلوبایت</p>
                     </div>
                   </div>
                   <ul className="space-y-2 text-[13px] text-emerald-100/70 leading-7 mb-6">
                     <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> دوبله هر اپ (یوتیوب و…) با MediaProjection</li>
                     <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> اجرا در پس‌زمینه + صفحه خاموش (FGS + Wake Lock)</li>
-                    <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> همان Session Rotation + متر عیب‌یابی زنده (سطح صدا، KB، خطاها)</li>
+                    <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> Session Rotation + نوار تشخیص زنده (سوکت / تأیید سرور / ضبط)</li>
                   </ul>
                   <a href="/downloads/livedub-android-source.zip" download>
                     <Button variant="outline" className="w-full h-11 rounded-xl border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 hover:text-emerald-100 font-extrabold">
@@ -576,7 +576,7 @@ gradle wrapper --gradle-version 8.9   # only if gradlew is missing
               <AudioLines className="w-4 h-4 text-[#04110c]" strokeWidth={2.5} />
             </span>
             <div>
-              <p className="text-[12.5px] font-bold">LiveDub v2.0</p>
+              <p className="text-[12.5px] font-bold">LiveDub v2.2</p>
               <p className="text-[10.5px] text-emerald-100/40">دوبله زنده با Gemini Live Translate</p>
             </div>
           </div>

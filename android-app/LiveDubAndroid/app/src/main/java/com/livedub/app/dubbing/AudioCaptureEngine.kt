@@ -16,10 +16,13 @@ import kotlin.concurrent.thread
  * صدای «سایر اپلیکیشن‌ها» را می‌گیرد: یوتیوب، تلگرام، مرورگر، پادکست و …
  * ورودی: 48kHz مونو PCM16 → خروجی: 16kHz مونو PCM16 (آماده ارسال به Gemini)
  *
- * ⭐ دیاگنوستیک (رفع مشکل «وصل است ولی دوبله نمی‌کند»):
- *  - اگر AudioRecord مقداردهی نشود، دیگر بی‌صدا نمی‌میرد و خطا گزارش می‌شود
- *  - سطح بلندی صدای ورودی (0..1) گزارش می‌شود تا UI متر زنده داشته باشد
- *  - اگر صدا کاملاً ساکت باشد، سرویس هشدار «اشتراک صدا» را نشان می‌دهد
+ * ⭐ دیاگنوستیک v2.2 (رفع مشکل «وصل است ولی دوبله نمی‌کند»):
+ *  - شمارنده چانک‌های خوانده‌شده (chunksRead) → UI تشخیص می‌دهد ضبط زنده است یا نه
+ *  - heartbeat: اگر ضبط اصلاً داده تولید نکند (خواندن برای همیشه بلاک شود)
+ *    بعد از ~۶ ثانیه خطای واضح گزارش می‌شود — دیگر هیچ حالت مرگ بی‌صدا وجود ندارد
+ *  - سطح بلندی صدای ورودی (0..1) برای متر زنده UI
+ *  - توقف درست: record.stop() برای از-بلاک-درآمدن خواندن (قبلاً thread برای همیشه
+ *    داخل read() گیر می‌کرد و AudioRecord هرگز آزاد نمی‌شد)
  */
 class AudioCaptureEngine(
     private val projection: MediaProjection,
@@ -32,6 +35,8 @@ class AudioCaptureEngine(
         const val CAPTURE_RATE = 48000
         const val TARGET_RATE = 16000
         private const val MAX_CONSECUTIVE_ERRORS = 5
+        private const val HEARTBEAT_TIMEOUT_MS = 6000L
+        private const val HEARTBEAT_TICK_MS = 1500L
     }
 
     private var record: AudioRecord? = null
@@ -39,6 +44,15 @@ class AudioCaptureEngine(
     private val running = AtomicBoolean(false)
     private val resampler = PcmResampler(CAPTURE_RATE, TARGET_RATE)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var heartbeat: Runnable? = null
+    private var startedAtMs = 0L
+
+    /** ⭐ تعداد چانک‌های ۱۰۰ms خوانده‌شده از AudioRecord (دیاگنوستیک UI) */
+    @Volatile var chunksRead = 0L
+        private set
+
+    /** آخرین زمانی که AudioRecord داده واقعی داد (دیاگنوستیک heartbeat) */
+    @Volatile private var lastReadAt = 0L
 
     fun start() {
         if (running.get()) return
@@ -70,7 +84,7 @@ class AudioCaptureEngine(
             return
         }
 
-        // ⭐ بررسی وضعیت مقداردهی اولیه — قبلاً اینجا خطاها بی‌صدا نادیده گرفته می‌شد
+        // ⭐ بررسی وضعیت مقداردهی اولیه — شکست اینجا بی‌صدا نمی‌ماند
         if (rec.state != AudioRecord.STATE_INITIALIZED) {
             val st = rec.state
             try { rec.release() } catch (_: Exception) {}
@@ -79,6 +93,9 @@ class AudioCaptureEngine(
         }
 
         record = rec
+        chunksRead = 0L
+        lastReadAt = 0L
+        startedAtMs = System.currentTimeMillis()
 
         // اگر کاربر/سیستم اشتراک پروجکشن را لغو کند
         projection.registerCallback(object : MediaProjection.Callback() {
@@ -88,6 +105,8 @@ class AudioCaptureEngine(
         }, Handler(Looper.getMainLooper()))
 
         running.set(true)
+        startHeartbeat()
+
         worker = thread(name = "livedub-capture") {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(4800) // 100ms در 48kHz
@@ -107,7 +126,9 @@ class AudioCaptureEngine(
                     }
                     if (n > 0) {
                         consecutiveErrors = 0
-                        // ⭐ محاسبه سطح صدا برای متر زنده + تشخیص سکوت
+                        chunksRead += 1
+                        lastReadAt = System.currentTimeMillis()
+                        // ⭐ محاسبه سطح صدا برای متر زنده
                         var maxAmp = 0
                         for (i in 0 until n) {
                             val a = if (buf[i] == Short.MIN_VALUE) Short.MAX_VALUE.toInt()
@@ -136,8 +157,50 @@ class AudioCaptureEngine(
         }
     }
 
+    /**
+     * ⭐ heartbeat ضبط: اگر ضبط «اصلاً» داده تولید نکند (خواندن بلاک شده یا
+     * سیستم هیچ استریمی نمی‌دهد)، بعد از ~۶ ثانیه خطای واضح می‌دهیم.
+     * توجه: سکوت دیجیتال (همه صفرها) اینجا خطا محسوب نمی‌شود چون داده
+     * جریان دارد — آن حالت با متر صفر و هشدار زرد «اشتراک صدا» پوشش داده می‌شود.
+     */
+    private fun startHeartbeat() {
+        stopHeartbeat()
+        val r = object : Runnable {
+            override fun run() {
+                if (!running.get()) return
+                val last = lastReadAt
+                val idle = if (last == 0L) {
+                    // هنوز اولین خواندن هم نیامده — از زمان شروع بشمار
+                    System.currentTimeMillis() - startedAtMs
+                } else {
+                    System.currentTimeMillis() - last
+                }
+                if (idle > HEARTBEAT_TIMEOUT_MS) {
+                    mainHandler.post {
+                        onCaptureError(
+                            "ضبط صدا هیچ داده‌ای تولید نمی‌کند (۶ ثانیه بدون داده) — " +
+                                "دوباره شروع کنید و در پنجره اجازه، «اشتراک صدا» را روشن کنید"
+                        )
+                    }
+                    return
+                }
+                mainHandler.postDelayed(this, HEARTBEAT_TICK_MS)
+            }
+        }
+        heartbeat = r
+        mainHandler.postDelayed(r, HEARTBEAT_TICK_MS)
+    }
+
+    private fun stopHeartbeat() {
+        heartbeat?.let { mainHandler.removeCallbacks(it) }
+        heartbeat = null
+    }
+
     fun stop() {
         running.set(false)
+        stopHeartbeat()
+        // ⭐ برای از-بلاک-درآمدن read()، خود ضبط را متوقف می‌کنیم
+        try { record?.stop() } catch (_: Exception) {}
         try { worker?.interrupt() } catch (_: Exception) {}
         try { worker?.join(600) } catch (_: Exception) {}
         worker = null

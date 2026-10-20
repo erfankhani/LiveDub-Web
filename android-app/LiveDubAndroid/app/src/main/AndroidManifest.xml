@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- برای برخی OEMها (مثل سامسونگ) که بدون آن گزینه «اشتراک صدا» در پنجره
+         MediaProjection نشان داده نمی‌شود. ضبط پخش صدا (AudioPlaybackCapture)
+         طبق مستندات به آن نیاز ندارد، ولی درخواست آن بی‌ضرر است. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:allowBackup="true"

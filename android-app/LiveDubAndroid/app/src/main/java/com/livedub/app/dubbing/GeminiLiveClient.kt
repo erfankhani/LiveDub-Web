@@ -25,12 +25,19 @@ import kotlin.math.pow
  * کلاینت WebSocket برای Gemini Live Translate
  *
  * ─────────────────────────────────────────────────────────────
+ *  ⭐⭐ فیکس «وصل است ولی صفر بایت ارسال می‌شود» (v2.2):
+ *  اکستنشن کرومِ اصلی (که روی همین پروتکل کار می‌کند) صدا را
+ *  بلافاصله بعد از باز شدن سوکت می‌فرستد و منتظر setupComplete
+ *  نمی‌ماند. نسخه قبلی اندروید منتظر setupComplete بود؛ اگر سرور
+ *  آن را نمی‌داد، هیچ بایتی ارسال نمی‌شد و بدون خطا همه‌چیز صفر
+ *  می‌ماند. اکنون:
+ *   - اتصال اولیه/اتصال مجدد → سوکت «فوراً» فعال است (مثل اکستنشن)
+ *   - تمدید سشن (rotate) → منتظر setupComplete برای Hot-Swap ایمن
+ *   - اگر setupComplete ظرف ۱۲ ثانیه نرسید، خطای واضح در UI نمایش
+ *     داده می‌شود (ولی ارسال صدا ادامه می‌یابد — مثل اکستنشن)
+ *
  *  رفع باگ «هر ۱۵ دقیقه قطع می‌شد» (همان راه‌حل نسخه کروم):
- *  سرور Gemini Live API سشن را بعد از حدود ۱۵ دقیقه می‌بندد.
- *  راه‌حل: Session Rotation — در دقیقه ~۱۳.۵ یک سوکت جدید به‌موازات
- *  سوکت فعال باز می‌شود؛ پس از setupComplete سوکت قدیمی بسته و
- *  سوکت جدید Hot-Swap می‌شود و سرویس صدا را از بافر فلاش می‌کند.
- *  + Auto-Reconnect با Backoff نمایی برای قطعی‌های غیرمنتظره
+ *  Session Rotation در دقیقه ~۱۳.۵ + Auto-Reconnect با Backoff
  * ─────────────────────────────────────────────────────────────
  */
 class GeminiLiveClient(
@@ -65,6 +72,7 @@ class GeminiLiveClient(
         const val RECONNECT_BASE_MS = 1200L
         const val RECONNECT_MAX_MS = 10_000L
         const val ROTATE_RETRY_MS = 5000L
+        const val SETUP_TIMEOUT_MS = 12_000L      // اگر setupComplete نیامد → خطای واضح
     }
 
     private val client = OkHttpClient.Builder()
@@ -83,6 +91,10 @@ class GeminiLiveClient(
     @Volatile private var reconnects = 0
     @Volatile var sentBytes = 0L      // مجموع بایت صدای ارسالی به سرور (دیاگنوستیک)
     @Volatile var recvAudioBytes = 0L // مجموع بایت صدای دوبله دریافتی (دیاگنوستیک)
+
+    /** ⭐ آیا سرور setupComplete داده؟ (برای نمایش مرحله در UI) */
+    @Volatile var isSetupComplete = false
+
     private var reconnectAttempts = 0
     private var reconnectJob: Job? = null
     private var rotationJob: Job? = null
@@ -166,6 +178,23 @@ class GeminiLiveClient(
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             webSocket.send(buildSetup())
+
+            // ⭐⭐ مثل اکستنشن کروم: برای اتصال اولیه/مجدد سوکت «فوراً» فعال می‌شود
+            // تا صدا بلافاصله جریان یابد. فقط تمدید سشن منتظر setupComplete می‌ماند.
+            if (mode != "rotate" && running) {
+                activate(webSocket, mode)
+            }
+
+            // ⭐ سگمنت تایم‌اوت Setup — اگر تأیید سرور نیامد، دیگر بی‌صدا نمی‌مانیم
+            scope.launch {
+                delay(SETUP_TIMEOUT_MS)
+                if (!ready && running && webSocket === activeSocket) {
+                    emitError(
+                        "سرور تأیید Setup (setupComplete) را نداد — کلید API را بررسی کنید؛ " +
+                            "ارسال صدا طبق پروتکل اکستنشن ادامه دارد"
+                    )
+                }
+            }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -178,10 +207,19 @@ class GeminiLiveClient(
                 emitError(if (code > 0) "خطای سرور ($code): $m" else "خطای سرور: $m")
             }
 
-            // ⭐ تأیید سشن جدید → فعال‌سازی (نقطه کلیدی Hot-Swap)
+            // ⭐ تأیید سشن جدید → فعال‌سازی (نقطه کلیدی Hot-Swap در تمدید)
             if (msg.has("setupComplete")) {
                 ready = true
-                activate(webSocket, mode)
+                isSetupComplete = true
+                if (webSocket !== activeSocket && running) {
+                    activate(webSocket, mode)
+                } else if (webSocket === activeSocket) {
+                    listener.onState(
+                        if (mode == "rotate") "سشن تمدید شد — بدون قطعی" else "تأیید سرور دریافت شد ✓",
+                        false
+                    )
+                    listener.onStats(rotations, reconnects, kb(sentBytes), kb(recvAudioBytes))
+                }
                 return
             }
 
@@ -257,19 +295,29 @@ class GeminiLiveClient(
 
     @Synchronized
     private fun handleDisconnect(ws: WebSocket, wasReady: Boolean) {
+        // اگر سوکت فعال بود → آمار Setup ریست شود
+        if (ws === activeSocket) {
+            activeSocket = null
+            isSetupComplete = false
+            if (running) scheduleReconnect()
+            return
+        }
         if (connectingSocket === ws) {
             connectingSocket = null
-            // سوکتی که اصلاً فعال نشد
-            if (ws !== activeSocket) {
-                if (wasReady.not() && running) {
+            if (ws === activeSocket) return
+            if (wasReady.not() && running) {
+                if (activeSocket != null) {
+                    // تلاش «تمدید» ناموفق بود ولی سوکت اصلی سالم است → تمدید را دوباره امتحان کن
+                    scope.launch {
+                        delay(ROTATE_RETRY_MS)
+                        if (running && activeSocket != null && connectingSocket == null) {
+                            openSocket("rotate")
+                        }
+                    }
+                } else {
                     scheduleReconnect()
                 }
             }
-            return
-        }
-        if (ws === activeSocket) {
-            activeSocket = null
-            if (running) scheduleReconnect()
         }
     }
 

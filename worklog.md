@@ -181,3 +181,24 @@ Stage Summary:
 - ریپو https://github.com/erfankhani/LiveDub-Android — HEAD = db73f67 (v2.3.0)، بیلد سبز
 - APK v2.3 با فیکس ریشه‌ای: چراغ «پیام سرور» در اپ باید بالای صفر بماند و «دوبله دریافتی» KB بگیرد
 - یادآوری: توکن ghp_3qYd... باید revoke شود
+
+---
+Task ID: 9
+Agent: main (Z.ai Code)
+Task: توکن جدید کاربر → بکاپ کامل: پوش ریپوی اصلی (صفحه دِلیوری + تستر وبی + اکستنشن) به GitHub
+
+Work Log:
+- توکن جدید تأیید شد: erfankhani، اسکوپ repo+workflow ✓ — توکن قبلی (ghp_3qYd...) حالا 401 می‌دهد = کاربر واقعاً revoke کرده بود ✓
+- LiveDub-Android بررسی شد: local = remote = db73f67، CI سبز — هیچ چیز برای پوش باقی نمانده بود
+- ریپوی اصلی هیچ‌وقت پوش نشده بود (تنها بخش بدون بکاپ): src/ (صفحه + LiveDubTester)، extension/، android-app/، public/downloads/
+- اسکن امنیتی قبل از پوش: git grep برای AIza… و ghp_… → هیچ کلیدی در فایل‌های tracked نبود ✓
+- فایل‌های machine-specific untrack شدند: .env (فقط مسیر SQLite محلی، بدون secret)، db/custom.db، .zscripts/dev.pid + gitignore (*.db, *.pid) → کامیت b1b4d77
+- ریپو erfankhani/LiveDub-Web ساخته شد (public) و push شد: 147 فایل، remote HEAD = b1b4d77 ✓ — remote بلافاصله حذف شد
+- تأیید نهایی: محتوای کلیدی روی remote موجود (src/extension/android-app/public)؛ CI اندروید همچنان سبز (db73f67)
+
+Stage Summary:
+- هر دو ریپو اکنون کامل و سینک‌اند:
+  • github.com/erfankhani/LiveDub-Android — اپ اندروید v2.3.0 + CI سبز + APK آماده (run 39424845155)
+  • github.com/erfankhani/LiveDub-Web — صفحه دِلیوری + تستر وبی + سورس اکستنشن کروم (بکاپ کامل)
+- فایل‌های حساس/ماشینی (env/db/pid) دیگر tracked نیستند؛ هیچ secret در هیچ‌کدام از دو ریپو نیست
+- توکن جدید (ghp_xhJg...) پس از استفاده باید revoke شود — در چت لو رفته است

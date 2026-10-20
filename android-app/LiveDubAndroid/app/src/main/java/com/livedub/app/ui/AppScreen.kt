@@ -337,8 +337,8 @@ fun AppScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth()) {
-                            StatCell(faNum(status.sentKb.toString()) + " KB", "صدا ارسالی ↑", Modifier.weight(1f))
-                            StatCell(faNum(status.recvKb.toString()) + " KB", "دوبله دریافتی ↓", Modifier.weight(1f))
+                            StatCell(faNum(status.sentKb) + " KB", "صدا ارسالی ↑", Modifier.weight(1f))
+                            StatCell(faNum(status.recvKb) + " KB", "دوبله دریافتی ↓", Modifier.weight(1f))
                         }
 
                         // ⭐ متر زنده صدا ورودی — اگر صفر بماند یعنی کپچر صدا کار نمی‌کند

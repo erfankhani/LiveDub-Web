@@ -202,3 +202,26 @@ Stage Summary:
   • github.com/erfankhani/LiveDub-Web — صفحه دِلیوری + تستر وبی + سورس اکستنشن کروم (بکاپ کامل)
 - فایل‌های حساس/ماشینی (env/db/pid) دیگر tracked نیستند؛ هیچ secret در هیچ‌کدام از دو ریپو نیست
 - توکن جدید (ghp_xhJg...) پس از استفاده باید revoke شود — در چت لو رفته است
+
+---
+Task ID: 10
+Agent: main (Z.ai Code)
+Task: درخواست کاربر «کدهای جدید را پوش کن و بیلد را آنجا آماده کن» → upgrade CI به Release خودکار + تگ v2.3.0
+
+Work Log:
+- هر دو ریپو بررسی شدند: LiveDub-Android سینک بود؛ LiveDub-Web یک کامیت worklog عقب بود → پوش شد (b1b4d77..76a715c)
+- مشکل UX کشف شده: آرتیفکت‌های Actions بعد از ~۹۰ روز منقضی می‌شوند و کاربر قبلاً APK قدیمی را اشتباهی دانلود کرده بود → راه‌حل: Release دائمی
+- build.yml ارتقا یافت (کامیت 5e6dbcb): تریگر تگ v* + permissions(contents:write) + جاب release با download-artifact(merge-multiple) + تغییر نام APK به «LiveDub-vX.Y.Z-debug.apk» + softprops/action-gh-release@v2 با body فارسی راهنمای نصب
+- تگ v2.3.0 ساخته و پوش شد → CI run 39436247910: SUCCESS ✓ (جاب build + release)
+- Release v2.3.0 ساخته شد: LiveDub-v2.3.0-debug.apk (53.1MB) + LiveDub-v2.3.0-release-unsigned.apk (2.5MB) — دانلود بدون لاگین تأیید شد (HTTP 200)
+- build شاخه main هم (39436212193) SUCCESS — سینتکس workflow جدید معتبر
+- page.tsx: باکس «⚡ سریع‌ترین راه — APK آماده از GitHub Releases» در تب اندروید راهنمای نصب اضافه شد (دکمه releases/latest + دانلود مستقیم v2.3.0)؛ lint 0 خطا؛ پوش 6168190
+- Agent-Browser: تب اندروید → باکس و هر دو لینک render شدند ✓ (اسکرین‌شات) — نکته: تب اندروید باید فعال شود تا لینک‌ها در DOM باشند (رفتار عادی Radix Tabs)
+- remoteها پس از هر پوش بلافاصله حذف شدند
+
+Stage Summary:
+- github.com/erfankhani/LiveDub-Android/releases/latest — صفحه دائمی دانلود APK (دیگر منقضی نمی‌شود و اشتباه نسخه ممکن نیست)
+- لینک مستقیم: /releases/download/v2.3.0/LiveDub-v2.3.0-debug.apk
+- از این به بعد: فقط تگ جدید بزن (مثلاً v2.4.0) → بیلد + Release خودکار
+- هر سه کامیت جدید: 5e6dbcb (workflow)، تگ v2.3.0، 6168190 (page) — همه پوش شده
+- توکن باید revoke شود

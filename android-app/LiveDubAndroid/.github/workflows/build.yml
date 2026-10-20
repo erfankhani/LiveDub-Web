@@ -3,7 +3,11 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -40,3 +44,43 @@ jobs:
         with:
           name: LiveDub-release-apk-unsigned
           path: app/build/outputs/apk/release/*.apk
+
+  # ⭐ وقتی تگ v* پوش شود → Release دائمی با APKها ساخته می‌شود
+  # (آرتیفکت‌های Actions بعد از ~۹۰ روز منقضی می‌شوند ولی Release برای همیشه می‌ماند)
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download built APKs
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: apks
+
+      - name: Rename APKs with version
+        run: |
+          mkdir -p rel
+          cp apks/app-debug.apk "rel/LiveDub-${GITHUB_REF_NAME}-debug.apk"
+          cp apks/app-release-unsigned.apk "rel/LiveDub-${GITHUB_REF_NAME}-release-unsigned.apk"
+          ls -la rel/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rel/*.apk
+          generate_release_notes: true
+          body: |
+            📱 **دوبله زنده با Gemini Live Translate**
+
+            ## دانلود
+            - **LiveDub-*-debug.apk** → نصب مستقیم روی گوشی (پیشنهادی)
+            - **LiveDub-*-release-unsigned.apk** → فقط برای توسعه‌دهندگان (نیاز به امضا دارد)
+
+            ## نصب
+            1. فایل debug را دانلود و نصب کنید (اگر اندروید اجازه نداد، «اجازه نصب از منابع ناشناس» را برای مرورگر فعال کنید)
+            2. کلید API را از [aistudio.google.com](https://aistudio.google.com) بگیرید و در اپ وارد کنید
+            3. «شروع دوبله» را بزنید و اجازه ضبط صفحه + اشتراک صدا را بدهید
+
+            ## عیب‌یابی (نوار چهارچراغی)
+            سوکت / تأیید سرور / ضبط صدا / پیام سرور — اگر «پیام سرور» صفر بود یعنی داده‌ای از Gemini نمی‌رسد

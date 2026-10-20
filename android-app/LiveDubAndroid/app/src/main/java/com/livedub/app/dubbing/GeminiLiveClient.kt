@@ -50,8 +50,11 @@ class GeminiLiveClient(
         /** سشن جدید آماده شد → سرویس باید بافر صدا را فلاش کند */
         fun onConnected()
 
-        /** آمار */
-        fun onStats(rotations: Int, reconnects: Int)
+        /** ⭐ خطای قابل‌نمایش (خطای سرور / قطع اتصال) — دیگر هیچ خطایی بی‌صدا نماند */
+        fun onError(message: String)
+
+        /** آمار (KB صدا ارسالی/دریافتی برای دیاگنوستیک) */
+        fun onStats(rotations: Int, reconnects: Int, sentKb: Int, recvKb: Int)
     }
 
     companion object {
@@ -78,9 +81,15 @@ class GeminiLiveClient(
 
     @Volatile private var rotations = 0
     @Volatile private var reconnects = 0
+    @Volatile var sentBytes = 0L      // مجموع بایت صدای ارسالی به سرور (دیاگنوستیک)
+    @Volatile var recvAudioBytes = 0L // مجموع بایت صدای دوبله دریافتی (دیاگنوستیک)
     private var reconnectAttempts = 0
     private var reconnectJob: Job? = null
     private var rotationJob: Job? = null
+
+    // جلوگیری از اسپم خطا‌های تکراری در UI
+    private var lastErrorText = ""
+    private var lastErrorAt = 0L
 
     /** سوکت آماده برای ارسال دارد؟ */
     val isOpen: Boolean
@@ -115,6 +124,18 @@ class GeminiLiveClient(
         val ws = activeSocket ?: return
         if (!running) return
         ws.send(buildAudioMessage(pcm))
+        sentBytes += pcm.size * 2L
+    }
+
+    /** گزارش خطا با دی‌دوپ (حداکثر یک پیام تکراری در ۳ ثانیه) */
+    private fun emitError(text: String) {
+        val now = System.currentTimeMillis()
+        synchronized(this) {
+            if (text == lastErrorText && now - lastErrorAt < 3000) return
+            lastErrorText = text
+            lastErrorAt = now
+        }
+        listener.onError(text)
     }
 
     // ─────────────── تمدید دوره‌ای سشن ───────────────
@@ -150,6 +171,13 @@ class GeminiLiveClient(
         override fun onMessage(webSocket: WebSocket, text: String) {
             val msg = try { JSONObject(text) } catch (_: Exception) { return }
 
+            // ⭐⭐ خطای سرور (کلید نامعتبر / مدل بدون دسترسی / کوتا) — دیگر مخفی نمی‌ماند
+            msg.optJSONObject("error")?.let { err ->
+                val m = err.optString("message").ifBlank { err.toString() }
+                val code = err.optInt("code", 0)
+                emitError(if (code > 0) "خطای سرور ($code): $m" else "خطای سرور: $m")
+            }
+
             // ⭐ تأیید سشن جدید → فعال‌سازی (نقطه کلیدی Hot-Swap)
             if (msg.has("setupComplete")) {
                 ready = true
@@ -177,16 +205,32 @@ class GeminiLiveClient(
                 for (i in 0 until parts.length()) {
                     val inline = parts.optJSONObject(i)?.optJSONObject("inlineData") ?: continue
                     val data = inline.optString("data")
-                    if (data.isNotBlank()) listener.onAudioOut(data)
+                    if (data.isNotBlank()) {
+                        recvAudioBytes += (data.length * 3L) / 4L // تقریب سایز base64
+                        listener.onAudioOut(data)
+                    }
                 }
             }
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            val httpCode = response?.code
+            val detail = when {
+                httpCode != null && httpCode >= 400 -> "پاسخ سرور: $httpCode (کلید API یا اتصال را بررسی کنید)"
+                t.message != null -> t.message!!
+                else -> "خطای نامشخص شبکه"
+            }
+            emitError("قطع اتصال — $detail")
             handleDisconnect(webSocket, ready)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (code != 1000) {
+                emitError(
+                    if (reason.isNotBlank()) "سشن بسته شد (کد $code): $reason"
+                    else "سشن بسته شد (کد $code)"
+                )
+            }
             handleDisconnect(webSocket, ready)
         }
     }
@@ -202,12 +246,14 @@ class GeminiLiveClient(
         reconnectAttempts = 0
         if (mode == "rotate") rotations++
         listener.onConnected()
-        listener.onStats(rotations, reconnects)
+        listener.onStats(rotations, reconnects, kb(sentBytes), kb(recvAudioBytes))
         listener.onState(
             if (mode == "rotate") "سشن تمدید شد — بدون قطعی" else "اتصال برقرار شد",
             false
         )
     }
+
+    private fun kb(bytes: Long): Int = (bytes / 1024L).toInt()
 
     @Synchronized
     private fun handleDisconnect(ws: WebSocket, wasReady: Boolean) {
@@ -241,7 +287,7 @@ class GeminiLiveClient(
             "قطع شد؛ اتصال مجدد در ${"%.1f".format(delayMs / 1000.0)} ثانیه (تلاش $reconnectAttempts)",
             true
         )
-        listener.onStats(rotations, reconnects)
+        listener.onStats(rotations, reconnects, kb(sentBytes), kb(recvAudioBytes))
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(delayMs)

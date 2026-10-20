@@ -44,6 +44,10 @@ class LiveDubService : Service() {
         const val EXTRA_RECONNECTS = "reconnects"
         const val EXTRA_STARTED_AT = "startedAt"
         const val EXTRA_SUBTITLES = "subtitles"     // آخرین خطوط زیرنویس با \n
+        const val EXTRA_SENT_KB = "sentKb"          // ⭐ دیاگنوستیک: KB صدای ارسالی
+        const val EXTRA_RECV_KB = "recvKb"          // ⭐ دیاگنوستیک: KB صدای دوبله دریافتی
+        const val EXTRA_INPUT_LEVEL = "inputLevel"  // ⭐ دیاگنوستیک: سطح صدا ورودی 0..1
+        const val EXTRA_WARN = "warn"               // none | warn | error
 
         private const val CHANNEL_ID = "livedub_service"
         private const val NOTIF_ID = 1001
@@ -68,6 +72,22 @@ class LiveDubService : Service() {
     // زیرنویس زنده
     private val subtitles = ArrayDeque<String>()
     private var lastSubtitleBroadcast = 0L
+
+    // ⭐ دیاگنوستیک: سکوت ورودی + آمار زنده برای UI
+    @Volatile private var lastInputLevel = 0f
+    @Volatile private var lastRotations = 0
+    @Volatile private var lastReconnects = 0
+    @Volatile private var lastReconnecting = false
+    private var maxAmpEver = 0f
+    private var inputChunks = 0
+    private var silenceWarned = false
+    private val statsTicker: Runnable = object : Runnable {
+        override fun run() {
+            if (isStopping || startedAt == 0L) return
+            broadcastStatsLive()
+            handler.postDelayed(this, 2000)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -123,6 +143,11 @@ class LiveDubService : Service() {
         // پخش صدای دوبله
         player = AudioPlayerEngine(voiceChannel).also {
             it.dubVolume = dubVol
+            it.onError = { msg ->
+                handler.post {
+                    if (!isStopping) broadcastStatus("dubbing", lastReconnecting, msg, "error")
+                }
+            }
             it.start()
         }
 
@@ -134,18 +159,49 @@ class LiveDubService : Service() {
         capture = AudioCaptureEngine(
             projection = proj,
             onPcm16k = { pcm -> handleCapturedPcm(pcm) },
+            onInputLevel = { lvl ->
+                lastInputLevel = lvl
+                handleSilenceWatchdog(lvl)
+            },
+            onCaptureError = { msg ->
+                handler.post {
+                    if (!isStopping) {
+                        broadcastStatus("error", false, msg, "error")
+                        stopEverything()
+                    }
+                }
+            },
             onProjectionRevoked = {
                 handler.post {
                     if (!isStopping) {
-                        broadcastStatus("error", false, "دسترسی ضبط توسط سیستم لغو شد")
+                        broadcastStatus("error", false, "دسترسی ضبط توسط سیستم لغو شد", "error")
                         stopEverything()
                     }
                 }
             }
         ).also { it.start() }
 
+        handler.post(statsTicker) // شروع ارسال آمار زنده به UI
         updateNotification("دوبله فعال (${langLabel(targetLang)})")
         broadcastStatus("dubbing", false, "دوبله فعال — هر اپی را پخش کنید ✅")
+    }
+
+    /** ⭐ اگر ۳ ثانیه اول صدا کاملاً ساکت بود، احتمالاً تاگل «اشتراک صدا» خاموش است */
+    private fun handleSilenceWatchdog(level: Float) {
+        inputChunks++
+        if (level > maxAmpEver) maxAmpEver = level
+        if (!silenceWarned && inputChunks >= 30 && maxAmpEver < 0.008f) {
+            silenceWarned = true
+            handler.post {
+                broadcastStatus(
+                    "dubbing", lastReconnecting,
+                    "صدایی از دستگاه دریافت نمی‌شود! در پنجره اجازه ضبط، گزینه «اشتراک صدا» را روشن کنید و ولوم اپ مقصد را بالا ببرید.",
+                    "warn"
+                )
+            }
+        } else if (silenceWarned && maxAmpEver >= 0.008f) {
+            silenceWarned = false // صدا برگشت → هشدار در broadcast بعدی پاک می‌شود
+        }
     }
 
     private fun getProjectionData(intent: Intent): Intent? {
@@ -202,12 +258,20 @@ class LiveDubService : Service() {
         }
 
         override fun onState(message: String, reconnecting: Boolean) {
+            lastReconnecting = reconnecting
             updateNotification(message)
             broadcastStatus(
                 if (reconnecting) "reconnecting" else "dubbing",
                 reconnecting,
-                message
+                message,
+                "none"
             )
+        }
+
+        override fun onError(message: String) {
+            handler.post {
+                if (!isStopping) broadcastStatus("dubbing", lastReconnecting, message, "error")
+            }
         }
 
         override fun onConnected() {
@@ -215,8 +279,10 @@ class LiveDubService : Service() {
             synchronized(bufferLock) { flushBufferLocked(c) }
         }
 
-        override fun onStats(rotations: Int, reconnects: Int) {
-            broadcastStats(rotations, reconnects)
+        override fun onStats(rotations: Int, reconnects: Int, sentKb: Int, recvKb: Int) {
+            lastRotations = rotations
+            lastReconnects = reconnects
+            broadcastStatsLive()
         }
     }
 
@@ -246,9 +312,15 @@ class LiveDubService : Service() {
         projection = null
 
         releaseWakeLock()
+        handler.removeCallbacks(statsTicker)
         synchronized(bufferLock) { audioBuffer.clear() }
         synchronized(subtitles) { subtitles.clear() }
         startedAt = 0L
+        lastInputLevel = 0f
+        maxAmpEver = 0f
+        inputChunks = 0
+        silenceWarned = false
+        lastReconnecting = false
 
         broadcastStatus("idle", false, "")
 
@@ -326,27 +398,36 @@ class LiveDubService : Service() {
 
     // ─────────────── برودکست وضعیت به UI ───────────────
 
-    private fun broadcastStatus(state: String, reconnecting: Boolean, message: String?) {
-        val i = Intent(ACTION_STATUS).setPackage(packageName)
-            .putExtra(EXTRA_STATE, state)
-            .putExtra(EXTRA_RECONNECTING, reconnecting)
-            .putExtra(EXTRA_MESSAGE, message ?: "")
-            .putExtra(EXTRA_ROTATIONS, 0) // آمار از broadcastStats می‌آید
-            .putExtra(EXTRA_STARTED_AT, startedAt)
-        i.putExtra(EXTRA_SUBTITLES, synchronized(subtitles) { subtitles.joinToString("\n") })
+    private fun broadcastStatus(state: String, reconnecting: Boolean, message: String?, level: String = "none") {
+        sendBroadcast(statusIntent(state, reconnecting, message ?: "", level))
+    }
+
+    /** آمار زنده (هر ۲ ثانیه + بعد از هر onStats) برای متر و شمارنده‌ها */
+    private fun broadcastStatsLive() {
+        val c = client
+        val i = statusIntent(
+            if (lastReconnecting) "reconnecting" else "dubbing",
+            lastReconnecting,
+            "",
+            if (silenceWarned) "warn" else "none"
+        )
+        i.putExtra(EXTRA_SENT_KB, ((c?.sentBytes ?: 0L) / 1024L).toInt())
+        i.putExtra(EXTRA_RECV_KB, ((c?.recvAudioBytes ?: 0L) / 1024L).toInt())
+        i.putExtra(EXTRA_INPUT_LEVEL, lastInputLevel)
         sendBroadcast(i)
     }
 
-    private fun broadcastStats(rotations: Int, reconnects: Int) {
+    private fun statusIntent(state: String, reconnecting: Boolean, message: String, warn: String): Intent {
         val i = Intent(ACTION_STATUS).setPackage(packageName)
-            .putExtra(EXTRA_STATE, "dubbing")
-            .putExtra(EXTRA_RECONNECTING, false)
-            .putExtra(EXTRA_MESSAGE, "")
-            .putExtra(EXTRA_ROTATIONS, rotations)
-            .putExtra(EXTRA_RECONNECTS, reconnects)
+            .putExtra(EXTRA_STATE, state)
+            .putExtra(EXTRA_RECONNECTING, reconnecting)
+            .putExtra(EXTRA_MESSAGE, message)
+            .putExtra(EXTRA_WARN, warn)
+            .putExtra(EXTRA_ROTATIONS, lastRotations)
+            .putExtra(EXTRA_RECONNECTS, lastReconnects)
             .putExtra(EXTRA_STARTED_AT, startedAt)
         i.putExtra(EXTRA_SUBTITLES, synchronized(subtitles) { subtitles.joinToString("\n") })
-        sendBroadcast(i)
+        return i
     }
 
     private fun langLabel(code: String): String = when (code) {

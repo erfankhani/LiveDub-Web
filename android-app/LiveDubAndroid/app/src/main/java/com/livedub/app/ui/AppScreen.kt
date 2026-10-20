@@ -101,6 +101,12 @@ fun AppScreen(
     var status by remember { mutableStateOf(getStatus()) }
     LaunchedEffect(Unit) { registerStatusListener { status = it } }
 
+    // آخرین پیام غیرخالی (چون broadcast آمار پیام را خالی می‌کند)
+    var lastMessage by remember { mutableStateOf("") }
+    LaunchedEffect(status.message) {
+        if (status.message.isNotBlank()) lastMessage = status.message
+    }
+
     // تایمر uptime
     var uptimeSec by remember { mutableStateOf(0) }
     val running = status.state == "dubbing" || status.state == "reconnecting"
@@ -142,9 +148,12 @@ fun AppScreen(
                 Spacer(Modifier.height(10.dp))
                 ReconnectBanner(status.message)
             }
-            if (status.state == "error" && status.message.isNotBlank()) {
+            if ((status.state == "error" || status.warn == "error") && lastMessage.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))
-                ErrorBanner(status.message)
+                ErrorBanner(lastMessage)
+            } else if (status.warn == "warn" && running) {
+                Spacer(Modifier.height(10.dp))
+                WarnBanner()
             }
 
             Spacer(Modifier.height(14.dp))
@@ -326,6 +335,39 @@ fun AppScreen(
                             StatCell(faNum(status.rotations), "تمدید سشن", Modifier.weight(1f))
                             StatCell(faNum(status.reconnects), "اتصال مجدد", Modifier.weight(1f))
                         }
+                        Spacer(Modifier.height(8.dp))
+                        Row(Modifier.fillMaxWidth()) {
+                            StatCell(faNum(status.sentKb.toString()) + " KB", "صدا ارسالی ↑", Modifier.weight(1f))
+                            StatCell(faNum(status.recvKb.toString()) + " KB", "دوبله دریافتی ↓", Modifier.weight(1f))
+                        }
+
+                        // ⭐ متر زنده صدا ورودی — اگر صفر بماند یعنی کپچر صدا کار نمی‌کند
+                        Spacer(Modifier.height(10.dp))
+                        Text("سطح صدای ورودی از دستگاه", fontSize = 10.5.sp, color = TextMuted)
+                        Spacer(Modifier.height(4.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .background(Color(0xFF1C2624), RoundedCornerShape(99.dp))
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(status.inputLevel.coerceIn(0f, 1f))
+                                    .height(7.dp)
+                                    .background(
+                                        if (status.inputLevel > 0.004f) Emerald else Color(0xFF3B4A46),
+                                        RoundedCornerShape(99.dp)
+                                    )
+                            )
+                        }
+                        if (status.inputLevel <= 0.004f) {
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                "⚠ ساکت — گزینه «اشتراک صدا» را در پنجره دسترسی روشن کنید",
+                                fontSize = 10.sp, color = Amber
+                            )
+                        }
                     }
 
                     if (running && status.subtitles.isNotBlank()) {
@@ -361,7 +403,7 @@ fun AppScreen(
                 Column(Modifier.padding(14.dp)) {
                     Text("چطور کار می‌کند؟", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE8EFEC))
                     Spacer(Modifier.height(8.dp))
-                    GuideLine("۱. روی «شروع دوبله» بزنید و اجازه ضبط صدا را بدهید")
+                    GuideLine("۱. روی «شروع دوبله» بزنید و در پنجره دسترسی، حتماً گزینه «اشتراک صدا / Share device audio» را روشن کنید")
                     GuideLine("۲. به هر اپی بروید (یوتیوب، تلگرام، مرورگر و…) و ویدیو پخش کنید")
                     GuideLine("۳. دوبله فارسی از روی صدای همان اپ پخش می‌شود — حتی در پس‌زمینه با صفحه خاموش")
                     GuideLine("۴. سشن هر ~۱۳ دقیقه به‌صورت خودکار تمدید می‌شود؛ دیگر هیچ‌وقت قطع نمی‌شود")
@@ -479,6 +521,28 @@ private fun ReconnectBanner(message: String) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Text("⟳ $message", fontSize = 11.5.sp, color = Amber, modifier = Modifier.padding(9.dp))
+    }
+}
+
+@Composable
+private fun WarnBanner() {
+    Surface(
+        shape = RoundedCornerShape(11.dp),
+        color = Amber.copy(alpha = 0.10f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.35f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(10.dp)) {
+            Text(
+                "⚠ صدای ورودی ساکت است!",
+                fontSize = 12.sp, color = Amber, fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "در پنجره اجازه ضبط، گزینه «اشتراک صدا / Share device audio» را روشن کنید و ولوم اپ مقصد (مثلاً یوتیوب) را بالا ببرید.",
+                fontSize = 11.sp, color = Amber.copy(alpha = 0.85f), lineHeight = 17.sp
+            )
+        }
     }
 }
 

@@ -120,3 +120,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ── LiveDub tester log console scrollbar ── */
+.live-dub-logs::-webkit-scrollbar {
+  width: 8px;
+}
+.live-dub-logs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.live-dub-logs::-webkit-scrollbar-thumb {
+  background: rgba(16, 185, 129, 0.25);
+  border-radius: 99px;
+}
+.live-dub-logs::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.45);
+}

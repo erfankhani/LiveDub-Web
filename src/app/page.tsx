@@ -18,6 +18,7 @@ import {
   ArrowDown,
   FileCode2,
   Wrench,
+  FlaskConical,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Separator } from "@/components/ui/separator";
+import LiveDubTester from "@/components/LiveDubTester";
 
 const fadeIn = {
   hidden: { opacity: 0, y: 22 },
@@ -186,6 +188,12 @@ export default function Home() {
                   دریافت فایل‌ها
                 </Button>
               </a>
+              <a href="#live-tester">
+                <Button size="lg" className="rounded-full h-12 px-7 bg-white/5 border border-emerald-500/35 text-emerald-200 hover:bg-emerald-500/15 hover:text-emerald-100 font-extrabold">
+                  <FlaskConical className="w-4.5 h-4.5 me-2" />
+                  تست زنده همین‌جا
+                </Button>
+              </a>
               <a href="#fix">
                 <Button size="lg" variant="outline" className="rounded-full h-12 px-7 border-emerald-500/30 text-emerald-200 hover:bg-emerald-500/10 hover:text-emerald-100 font-bold">
                   ریشه‌یابی باگ ۱۵ دقیقه
@@ -218,6 +226,29 @@ export default function Home() {
               ))}
             </motion.div>
           </div>
+        </section>
+
+        {/* ─────────── Live Tester: پیش‌نمایش اجرایی ─────────── */}
+        <section id="live-tester" className="mx-auto max-w-6xl px-4 sm:px-6 pb-4 scroll-mt-20">
+          <motion.div
+            variants={fadeIn}
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, amount: 0.2 }}
+            className="text-center mb-8"
+          >
+            <Badge className="bg-amber-400/10 text-amber-300 border border-amber-400/25 rounded-full mb-4 hover:bg-amber-400/15">
+              <FlaskConical className="w-3.5 h-3.5 me-1.5" /> پیش‌نمایش اجرایی — نسخه وب
+            </Badge>
+            <h3 className="text-2xl sm:text-3xl font-extrabold">اپ را همین‌جا زنده تست کنید</h3>
+            <p className="mt-3 text-sm text-emerald-100/55 max-w-2xl mx-auto leading-7">
+              این دقیقاً همان موتور اپ اندروید است که در مرورگر اجرا شده: ضبط صدا → Gemini Live Translate → پخش دوبله.
+              برای عیب‌یابی «وصل است ولی دوبله نمی‌کند» هم عالی است — متر صدا، شمارنده بایت و لاگ کامل نشان می‌دهد مشکل کجاست.
+            </p>
+          </motion.div>
+          <motion.div variants={fadeIn} initial="hidden" whileInView="show" viewport={{ once: true, amount: 0.05 }}>
+            <LiveDubTester />
+          </motion.div>
         </section>
 
         {/* ─────────── Fix: چرا ۱۵ دقیقه قطع می‌شد ─────────── */}
@@ -425,14 +456,14 @@ export default function Home() {
                       <Smartphone className="w-6 h-6 text-emerald-300" />
                     </span>
                     <div>
-                      <h4 className="font-extrabold text-[16px]">سورس اندروید — Kotlin + Compose</h4>
-                      <p className="text-[11px] text-emerald-100/50">ZIP · {formatFa("142")} کیلوبایت</p>
+                      <h4 className="font-extrabold text-[16px]">سورس اندروید — Kotlin + Compose · v2.1</h4>
+                      <p className="text-[11px] text-emerald-100/50">ZIP · {formatFa("350")} کیلوبایت</p>
                     </div>
                   </div>
                   <ul className="space-y-2 text-[13px] text-emerald-100/70 leading-7 mb-6">
                     <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> دوبله هر اپ (یوتیوب و…) با MediaProjection</li>
                     <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> اجرا در پس‌زمینه + صفحه خاموش (FGS + Wake Lock)</li>
-                    <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> همان Session Rotation + UI مدرن RTL</li>
+                    <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-1" /> همان Session Rotation + متر عیب‌یابی زنده (سطح صدا، KB، خطاها)</li>
                   </ul>
                   <a href="/downloads/livedub-android-source.zip" download>
                     <Button variant="outline" className="w-full h-11 rounded-xl border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 hover:text-emerald-100 font-extrabold">

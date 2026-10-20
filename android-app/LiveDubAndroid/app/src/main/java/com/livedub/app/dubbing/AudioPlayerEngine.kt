@@ -29,6 +29,9 @@ class AudioPlayerEngine(private val useVoiceCallChannel: Boolean) {
     private val queue = ConcurrentLinkedQueue<ByteArray>()
     private val running = AtomicBoolean(false)
 
+    /** ⭐ خطای قابل‌نمایش پخش — دیگر هیچ شکستی بی‌صدا نماند */
+    @Volatile var onError: ((String) -> Unit)? = null
+
     @Volatile var dubVolume: Float = 1.0f
 
     fun start() {
@@ -53,12 +56,28 @@ class AudioPlayerEngine(private val useVoiceCallChannel: Boolean) {
             SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
 
-        val t = AudioTrack(
-            attrs, format,
-            maxOf(minBuf, 9600) * 4,
-            AudioTrack.MODE_STREAM,
-            AudioManager.AUDIO_SESSION_ID_GENERATE
-        )
+        val t = try {
+            AudioTrack(
+                attrs, format,
+                maxOf(minBuf, 9600) * 4,
+                AudioTrack.MODE_STREAM,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            )
+        } catch (e: Exception) {
+            onError?.invoke("راه‌اندازی پخش صدا ناموفق بود: ${e.message}")
+            running.set(false)
+            return
+        }
+
+        // ⭐ بررسی وضعیت مقداردهی اولیه AudioTrack — قبلاً شکست اینجا بی‌صدا بود
+        if (t.state != AudioTrack.STATE_INITIALIZED) {
+            val st = t.state
+            try { t.release() } catch (_: Exception) {}
+            onError?.invoke("پخش صدا مقداردهی نشد (state=$st)")
+            running.set(false)
+            return
+        }
+
         track = t
 
         worker = thread(name = "livedub-player") {
@@ -79,8 +98,16 @@ class AudioPlayerEngine(private val useVoiceCallChannel: Boolean) {
                     }
                     while (running.get() && chunk.isNotEmpty()) {
                         t.setVolume(dubVolume)
-                        val written = t.write(chunk, 0, chunk.size) // blocking
-                        if (written <= 0) break
+                        val written = try {
+                            t.write(chunk, 0, chunk.size) // blocking
+                        } catch (e: Exception) {
+                            onError?.invoke("خطا در پخش: ${e.message}")
+                            break
+                        }
+                        if (written <= 0) {
+                            onError?.invoke("پخش متوقف شد (کد $written)")
+                            break
+                        }
                         if (written < chunk.size) {
                             chunk = chunk.copyOfRange(written, chunk.size)
                         } else break

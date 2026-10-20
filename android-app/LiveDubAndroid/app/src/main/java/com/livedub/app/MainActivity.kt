@@ -38,7 +38,11 @@ class MainActivity : ComponentActivity() {
         val rotations: Int = 0,
         val reconnects: Int = 0,
         val startedAt: Long = 0,
-        val subtitles: String = ""
+        val subtitles: String = "",
+        val sentKb: Int = 0,
+        val recvKb: Int = 0,
+        val inputLevel: Float = 0f,
+        val warn: String = "none"
     )
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -51,7 +55,11 @@ class MainActivity : ComponentActivity() {
                 rotations = intent.getIntExtra(LiveDubService.EXTRA_ROTATIONS, 0),
                 reconnects = intent.getIntExtra(LiveDubService.EXTRA_RECONNECTS, 0),
                 startedAt = intent.getLongExtra(LiveDubService.EXTRA_STARTED_AT, 0),
-                subtitles = intent.getStringExtra(LiveDubService.EXTRA_SUBTITLES) ?: ""
+                subtitles = intent.getStringExtra(LiveDubService.EXTRA_SUBTITLES) ?: "",
+                sentKb = intent.getIntExtra(LiveDubService.EXTRA_SENT_KB, 0),
+                recvKb = intent.getIntExtra(LiveDubService.EXTRA_RECV_KB, 0),
+                inputLevel = intent.getFloatExtra(LiveDubService.EXTRA_INPUT_LEVEL, 0f),
+                warn = intent.getStringExtra(LiveDubService.EXTRA_WARN) ?: "none"
             )
             onStatus?.invoke(snap)
         }

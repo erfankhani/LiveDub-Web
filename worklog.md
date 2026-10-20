@@ -54,3 +54,25 @@ Stage Summary:
 - سورس Kotlin 100% معتبر است (بیلد CI موفق)
 - کاربر می‌تواند APK را از Actions → Build APK → Artifacts دانلود کند
 - به کاربر توصیه شد توکن را revoke/rotate کند چون در چت به اشتراک گذاشته شده
+
+---
+Task ID: 3
+Agent: main (Z.ai Code)
+Task: رفع باگ «اپ اندروید وصل می‌شود ولی دوبله نمی‌کند» + پیش‌نمایش اجرایی وبی برای تست در پنل Preview
+
+Work Log:
+- مقایسه سورس اندروید با اکستنشن اصلی کاربر (upload/offscreen.js): پروتکل و مدل (gemini-3.5-live-translate-preview) یکسان و صحیح بود — تأیید وجود مدل در مستندات رسمی ai.google.dev
+- ریشه‌ها: خطاهای سرور/سوکت در GeminiLiveClient بی‌صدا نادیده می‌شدند؛ AudioRecord/AudioTrack بدون بررسی state بودند (شکست بی‌صدا)؛ تاگل «اشتراک صدا» خاموش = کپچر کاملاً ساکت بدون هیچ هشداری
+- GeminiLiveClient.kt: handler جدید onError + دی‌دوپ خطا + شمارنده sentBytes/recvAudioBytes + onStats چهارآرگومانی + نمایش کد HTTP/کد close
+- AudioCaptureEngine.kt: بررسی STATE_INITIALIZED + گزارش سطح صدا (0..1) + خطاهای read با کد + Handler اصلی برای callback پروجکشن
+- AudioPlayerEngine.kt: بررسی state + onError callback
+- LiveDubService.kt: watchdog سکوت (۳ ثانیه → هشدار زرد «اشتراک صدا») + broadcastStatsLive هر ۲ ثانیه + extras جدید (sentKb/recvKb/inputLevel/warn)
+- MainActivity/AppScreen: بنر خطا/هشدار + متر زنده ورودی + آمار KB + راهنمای Share device audio
+- src/components/LiveDubTester.tsx: موتور کامل دوبله وبی (همان پروتکل: setup + translationConfig + rotation 13.5min + backoff + بافر) با متر صدا، زیرنویس، کنسول لاگ، دکمه «تست چرخش سشن»، کلید در localStorage
+- public/livedub-pcm-processor.js (AudioWorklet) + سکشن «تست زنده همین‌جا» در page.tsx + استایل اسکرول‌بار
+- Agent-Browser: شروع بدون کلید → پیام خطا ✓؛ با استریم ماک → اتصال واقعی WS به گوگل ✓، سرور پاسخ «API key not valid (کد 1007)» داد و در بنر/لاگ نمایش یافت ✓ (با کلید واقعی همان مسیر تا setupComplete می‌رود)؛ موبایل ریسپانسیو ✓؛ فوتر sticky gap=0 ✓؛ zip جدید 200 ✓؛ lint 0 خطا
+- زیپ اندروید بازسازی شد (public/downloads/livedub-android-source.zip — 350KB) و کامیت محلی 6835821 ساخته شد
+
+Stage Summary:
+- پوش به GitHub انجام نشد: توکن کاربر دیگر معتبر نیست (401) — احتمالاً revoke شده. کامیت محلی آماده است؛ دستور پوش با توکن جدید باید اجرا شود
+- اپ اندروید v2.1 اکنون هر شکست احتمالی را در UI نشان می‌دهد؛ شایع‌ترین علت کاربر (تاگل اشتراک صدا) با هشدار زرد + متر صفر قابل مشاهده است

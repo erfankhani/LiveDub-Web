@@ -1,0 +1,21 @@
+{
+    "manifest_version": 3,
+    "name": "Custom Live Tab Dubber",
+    "version": "1.1",
+    "description": "دوبله و ترجمه زنده صدای تب با Gemini Live Translate",
+    "permissions": [
+      "tabCapture",
+      "storage",
+      "offscreen"
+    ],
+    "host_permissions": [
+      "https://generativelanguage.googleapis.com/*",
+      "wss://generativelanguage.googleapis.com/*"
+    ],
+    "action": {
+      "default_popup": "popup.html"
+    },
+    "background": {
+      "service_worker": "background.js"
+    }
+  }

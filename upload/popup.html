@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 300px; font-family: system-ui, sans-serif; padding: 14px; margin: 0; background: #f8fafc; }
+    h3 { margin: 0 0 12px; font-size: 16px; color: #1e293b; }
+    label { display: block; font-size: 13px; margin-bottom: 4px; color: #475569; }
+    input, select, button { width: 100%; box-sizing: border-box; margin-bottom: 12px; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 14px; }
+    button { background: #2563eb; color: #fff; cursor: pointer; border: none; font-weight: 600; }
+    button:hover { background: #1d4ed8; }
+    #stopBtn { background: #dc2626; display: none; }
+    #stopBtn:hover { background: #b91c1c; }
+    .hint { font-size: 12px; color: #64748b; margin-top: -8px; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <h3>دوبله زنده تب (Live Translate)</h3>
+  <label>کلید Gemini API:</label>
+  <input type="password" id="apiKey" placeholder="AIzaSy..." />
+  <div class="hint">کلید فقط روی دستگاه شما ذخیره می‌شود.</div>
+
+  <label>زبان خروجی:</label>
+  <select id="targetLang">
+    <option value="fa">فارسی (Persian)</option>
+    <option value="en">انگلیسی (English)</option>
+    <option value="tr">ترکی (Turkish)</option>
+    <option value="ar">عربی (Arabic)</option>
+    <option value="es">اسپانیایی (Spanish)</option>
+    <option value="fr">فرانسوی (French)</option>
+    <option value="de">آلمانی (German)</option>
+    <option value="zh-Hans">چینی ساده (Chinese)</option>
+    <option value="ja">ژاپنی (Japanese)</option>
+    <option value="ko">کره‌ای (Korean)</option>
+  </select>
+
+  <button id="startBtn">شروع دوبله</button>
+  <button id="stopBtn">توقف</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>

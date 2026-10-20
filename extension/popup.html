@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    :root {
+      --bg: #0b0f0e;
+      --panel: #121716;
+      --panel-2: #182020;
+      --line: #24302d;
+      --text: #e8efec;
+      --muted: #93a49e;
+      --accent: #10b981;
+      --accent-2: #34d399;
+      --accent-dark: #059669;
+      --danger: #f87171;
+      --amber: #fbbf24;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 372px;
+      font-family: "Vazirmatn", "Segoe UI", Tahoma, system-ui, sans-serif;
+      background:
+        radial-gradient(120% 90% at 85% -10%, rgba(16,185,129,.16) 0%, transparent 55%),
+        radial-gradient(90% 70% at 0% 110%, rgba(16,185,129,.08) 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      padding: 14px 14px 12px;
+      user-select: none;
+    }
+
+    /* ── هدر ── */
+    .header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent-dark), var(--accent-2));
+      display: grid; place-items: center;
+      box-shadow: 0 4px 18px rgba(16,185,129,.35);
+      flex-shrink: 0;
+    }
+    .logo svg { width: 22px; height: 22px; }
+    .titles { flex: 1; min-width: 0; }
+    .titles h1 { font-size: 15.5px; font-weight: 800; letter-spacing: .2px; }
+    .titles p { font-size: 11px; color: var(--muted); margin-top: 1px; }
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--panel-2); border: 1px solid var(--line);
+      padding: 5px 10px; border-radius: 999px; font-size: 11px; color: var(--muted);
+      flex-shrink: 0;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
+    .dot.live { background: var(--accent); box-shadow: 0 0 0 0 rgba(16,185,129,.5); animation: pulse 1.6s infinite; }
+    .dot.err { background: var(--danger); }
+    .dot.warn { background: var(--amber); }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16,185,129,.45); }
+      70% { box-shadow: 0 0 0 7px rgba(16,185,129,0); }
+      100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+    }
+
+    /* ── بنر بازاتصال ── */
+    .banner {
+      display: none; align-items: center; gap: 8px;
+      background: rgba(251,191,36,.1); border: 1px solid rgba(251,191,36,.3);
+      color: var(--amber); font-size: 11.5px;
+      padding: 8px 10px; border-radius: 10px; margin-bottom: 12px;
+    }
+    .banner.show { display: flex; }
+
+    /* ── فرم ── */
+    .card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 13px; margin-bottom: 12px;
+    }
+    .field { margin-bottom: 12px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+    .input-wrap { position: relative; }
+    input, select {
+      width: 100%; padding: 9.5px 11px; border-radius: 10px;
+      border: 1px solid var(--line); background: var(--panel-2);
+      color: var(--text); font-size: 13px; outline: none;
+      font-family: inherit;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus, select:focus { border-color: var(--accent-dark); box-shadow: 0 0 0 3px rgba(16,185,129,.14); }
+    select { appearance: none; cursor: pointer; }
+    .select-wrap { position: relative; }
+    .select-wrap::after {
+      content: "▾"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      color: var(--muted); font-size: 12px; pointer-events: none;
+    }
+    .eye {
+      position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      padding: 4px; border-radius: 6px; line-height: 0;
+    }
+    .eye:hover { color: var(--text); }
+    .hint { font-size: 10.5px; color: var(--muted); margin-top: 5px; }
+
+    /* ── اسلایدرها ── */
+    .vol-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .vol-head { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+    .vol-head b { color: var(--text); font-weight: 700; }
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none; height: 5px; border-radius: 99px;
+      background: linear-gradient(to left, var(--accent) var(--fill,50%), #2a3634 var(--fill,50%));
+      padding: 0; border: none; cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #fff; border: 3px solid var(--accent); box-shadow: 0 1px 6px rgba(0,0,0,.4);
+    }
+
+    /* ── دکمه اصلی ── */
+    .cta {
+      width: 100%; padding: 11.5px; border: none; border-radius: 12px;
+      font-size: 14px; font-weight: 800; font-family: inherit;
+      cursor: pointer; color: #04110c;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 6px 20px rgba(16,185,129,.35);
+      transition: transform .12s, filter .15s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .cta:hover { filter: brightness(1.08); }
+    .cta:active { transform: scale(.98); }
+    .cta.stop {
+      background: linear-gradient(135deg, #ef4444, #f87171);
+      color: #fff; box-shadow: 0 6px 20px rgba(239,68,68,.3);
+    }
+
+    /* ── آمار ── */
+    .stats { display: none; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .stats.show { display: grid; }
+    .stat {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+      padding: 9px 6px; text-align: center;
+    }
+    .stat b { display: block; font-size: 14.5px; font-weight: 800; color: var(--accent-2); font-variant-numeric: tabular-nums; }
+    .stat span { font-size: 9.5px; color: var(--muted); }
+
+    /* ── زیرنویس ── */
+    .subs { display: none; flex-direction: column; margin-bottom: 12px; }
+    .subs.show { display: flex; }
+    .subs-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin: 2px 2px 7px; }
+    .subs-box {
+      background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+      max-height: 148px; overflow-y: auto; padding: 10px;
+      display: flex; flex-direction: column; gap: 7px;
+    }
+    .subs-box::-webkit-scrollbar { width: 5px; }
+    .subs-box::-webkit-scrollbar-thumb { background: #2b3a37; border-radius: 99px; }
+    .sub { font-size: 11.5px; line-height: 1.7; padding: 6px 9px; border-radius: 9px; }
+    .sub.in { background: var(--panel-2); color: var(--muted); }
+    .sub.out { background: rgba(16,185,129,.1); color: #d1fae5; border: 1px solid rgba(16,185,129,.22); }
+    .subs-empty { font-size: 11px; color: var(--muted); text-align: center; padding: 12px 0; }
+
+    .foot {
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      font-size: 10px; color: var(--muted); margin-top: 4px;
+    }
+    .foot .k { color: var(--accent); }
+
+    .err-line {
+      display: none; font-size: 11px; color: var(--danger);
+      background: rgba(239,68,68,.09); border: 1px solid rgba(239,68,68,.25);
+      border-radius: 10px; padding: 8px 10px; margin-bottom: 12px; line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+  <!-- هدر -->
+  <header class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#04110c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+        <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+        <path d="M12 18v4"/>
+      </svg>
+    </div>
+    <div class="titles">
+      <h1>LiveDub</h1>
+      <p>دوبله زنده با Gemini · v2.0</p>
+    </div>
+    <div class="status-pill">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">غیرفعال</span>
+    </div>
+  </header>
+
+  <!-- بنر بازاتصال -->
+  <div class="banner" id="banner">
+    <span>⟳</span><span id="bannerText">در حال اتصال مجدد…</span>
+  </div>
+
+  <div class="err-line" id="errLine"></div>
+
+  <!-- تنظیمات -->
+  <section class="card">
+    <div class="field">
+      <label for="apiKey">کلید Gemini API</label>
+      <div class="input-wrap">
+        <input type="password" id="apiKey" placeholder="AIzaSy…" autocomplete="off" spellcheck="false" />
+        <button class="eye" id="eyeBtn" title="نمایش/مخفی">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <div class="hint">کلید فقط روی دستگاه شما ذخیره می‌شود.</div>
+    </div>
+
+    <div class="field">
+      <label for="targetLang">زبان خروجی دوبله</label>
+      <div class="select-wrap">
+        <select id="targetLang">
+          <option value="fa">فارسی (Persian)</option>
+          <option value="en">انگلیسی (English)</option>
+          <option value="tr">ترکی (Turkish)</option>
+          <option value="ar">عربی (Arabic)</option>
+          <option value="es">اسپانیایی (Spanish)</option>
+          <option value="fr">فرانسوی (French)</option>
+          <option value="de">آلمانی (German)</option>
+          <option value="ru">روسی (Russian)</option>
+          <option value="zh-Hans">چینی ساده (Chinese)</option>
+          <option value="ja">ژاپنی (Japanese)</option>
+          <option value="ko">کره‌ای (Korean)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="vol-row">
+      <div>
+        <div class="vol-head"><span>صدای اصلی</span><b id="origVal">۱۵٪</b></div>
+        <input type="range" id="origVol" min="0" max="100" value="15" />
+      </div>
+      <div>
+        <div class="vol-head"><span>صدای دوبله</span><b id="dubVal">۱۰۰٪</b></div>
+        <input type="range" id="dubVol" min="0" max="100" value="100" />
+      </div>
+    </div>
+  </section>
+
+  <!-- آمار زنده -->
+  <section class="stats" id="stats">
+    <div class="stat"><b id="uptime">۰:۰۰</b><span>زمان دوبله</span></div>
+    <div class="stat"><b id="rotations">۰</b><span>تمدید سشن</span></div>
+    <div class="stat"><b id="reconnects">۰</b><span>اتصال مجدد</span></div>
+  </section>
+
+  <!-- زیرنویس زنده -->
+  <section class="subs" id="subs">
+    <div class="subs-head">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 12h4M14 12h4M7 15.5h10"/></svg>
+      زیرنویس زنده
+    </div>
+    <div class="subs-box" id="subsBox">
+      <div class="subs-empty">با شروع دوبله، متن گفتار اینجا نمایش داده می‌شود…</div>
+    </div>
+  </section>
+
+  <!-- دکمه‌ها -->
+  <button class="cta" id="startBtn">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72c0 .8.87 1.3 1.56.88l11-6.86a1.03 1.03 0 0 0 0-1.76l-11-6.86A1.03 1.03 0 0 0 8 5.14Z"/></svg>
+    شروع دوبله
+  </button>
+  <button class="cta stop" id="stopBtn" style="display:none">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+    توقف دوبله
+  </button>
+
+  <div class="foot">
+    دوبله در <span class="k">پس‌زمینه</span> ادامه دارد — می‌توانید این پنجره را ببندید
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

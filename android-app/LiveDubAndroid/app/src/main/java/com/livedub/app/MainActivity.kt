@@ -15,6 +15,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import com.livedub.app.dubbing.LiveDubService
+import com.livedub.app.ui.AppScreen
 import com.livedub.app.ui.theme.LiveDubTheme
 
 class MainActivity : ComponentActivity() {

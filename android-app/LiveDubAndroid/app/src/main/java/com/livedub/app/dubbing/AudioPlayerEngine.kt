@@ -29,7 +29,7 @@ class AudioPlayerEngine(private val useVoiceCallChannel: Boolean) {
     private val queue = ConcurrentLinkedQueue<ByteArray>()
     private val running = AtomicBoolean(false)
 
-    @Volatile var volume: Float = 1.0f
+    @Volatile var dubVolume: Float = 1.0f
 
     fun start() {
         if (running.getAndSet(true)) return
@@ -78,7 +78,7 @@ class AudioPlayerEngine(private val useVoiceCallChannel: Boolean) {
                         primedFlag.set(true)
                     }
                     while (running.get() && chunk.isNotEmpty()) {
-                        t.setVolume(volume)
+                        t.setVolume(dubVolume)
                         val written = t.write(chunk, 0, chunk.size) // blocking
                         if (written <= 0) break
                         if (written < chunk.size) {
@@ -106,8 +106,8 @@ class AudioPlayerEngine(private val useVoiceCallChannel: Boolean) {
     }
 
     fun setVolume(v: Float) {
-        volume = v.coerceIn(0f, 1f)
-        track?.setVolume(volume)
+        dubVolume = v.coerceIn(0f, 1f)
+        track?.setVolume(dubVolume)
     }
 
     fun stop() {

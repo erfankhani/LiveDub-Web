@@ -58,7 +58,7 @@ class GeminiLiveClient(
         const val WS_BASE =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
         const val MODEL = "models/gemini-3.5-live-translate-preview"
-        const val ROTATE_MS = 13.5 * 60 * 1000L   // تمدید سشن قبل از سقف ~۱۵ دقیقه سرور
+        const val ROTATE_MS = 810_000L            // ۱۳.۵ دقیقه — تمدید سشن قبل از سقف ~۱۵ دقیقه سرور
         const val RECONNECT_BASE_MS = 1200L
         const val RECONNECT_MAX_MS = 10_000L
         const val ROTATE_RETRY_MS = 5000L

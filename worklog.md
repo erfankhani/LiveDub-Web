@@ -33,3 +33,24 @@ Stage Summary:
 - باگ ۱۵ دقیقه با Session Rotation رفع شد (هم در کروم هم اندروید)
 - دوبله بک‌گراند: کروم = offscreen doc مستقل؛ اندروید = FGS + WakeLock + MediaProjection برای هر اپ
 - خروجی‌ها: extension/ , android-app/LiveDubAndroid/ , public/downloads/
+
+---
+Task ID: 2
+Agent: main (Z.ai Code)
+Task: پوش پروژه اندروید به GitHub کاربر (erfankhani) + بیلد خودکار APK
+
+Work Log:
+- توکن کاربر بررسی شد: اکانت erfankhani، اسکوپ repo+workflow
+- workflow بیلد APK اضافه شد: .github/workflows/build.yml (JDK 17 + Gradle 8.9 + assembleDebug/Release + upload artifact)
+- ریپو erfankhani/LiveDub-Android ساخته و پوش شد (3 کامیت)
+- بیلد اول fail شد: import های جاافتاده MainActivity (LiveDubService, AppScreen) + ROTATE_MS به‌صورت Double بود (13.5*60*1000L) → اصلاح به 810_000L
+- بیلد دوم fail شد: تداخل JVM signature پراپرتی volume با متد setVolume → پراپرتی به dubVolume تغییر نام یافت
+- بیلد سوم: SUCCESS ✓ — دو آرتیفکت: LiveDub-debug-apk (~14MB) و LiveDub-release-apk-unsigned (~1.3MB)
+- زیپ محلی android با کد اصلاح‌شده به‌روزرسانی شد
+- توکن از git remote حذف شد و در هیچ فایلی ذخیره نشد
+
+Stage Summary:
+- ریپو: https://github.com/erfankhani/LiveDub-Android (public, main branch)
+- سورس Kotlin 100% معتبر است (بیلد CI موفق)
+- کاربر می‌تواند APK را از Actions → Build APK → Artifacts دانلود کند
+- به کاربر توصیه شد توکن را revoke/rotate کند چون در چت به اشتراک گذاشته شده

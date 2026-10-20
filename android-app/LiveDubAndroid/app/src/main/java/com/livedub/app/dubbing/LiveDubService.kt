@@ -122,7 +122,7 @@ class LiveDubService : Service() {
 
         // پخش صدای دوبله
         player = AudioPlayerEngine(voiceChannel).also {
-            it.volume = dubVol
+            it.dubVolume = dubVol
             it.start()
         }
 

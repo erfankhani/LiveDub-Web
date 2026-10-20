@@ -250,3 +250,22 @@ Stage Summary:
 - آماده محلی: اندروید = کامیت 795a9ee + تگ v2.4.0 (پوش تگ → بیلد + Release خودکار با workflow جدید)؛ وب = 3a1f95c
 - برای انتشار فقط نیاز به توکن جدید است؛ دستورات پوش آماده است
 - نکته کلیدی برای کاربر: اسلایدر دوبله قبلاً زنده نبود (فقط اجرای بعد) — الان زنده است؛ لوپ = پخش تکراری ریلز
+
+---
+Task ID: 12
+Agent: main (Z.ai Code)
+Task: توکن جدید سوم کاربر → انتشار v2.4 (پوش بلاک‌شده Task 11) + تأیید Release
+
+Work Log:
+- توکن سوم (ghp_9VsC...) تأیید شد: erfankhani، اسکوپ repo+workflow ✓
+- کد v2.4 قبل از پوش مجدداً verify شد: versionCode 4 / versionName 2.4.0 ✓، «زیرنویس زنده» صفر رفرنس ✓، دو اسلایدر زنده (setDubVolumeLive→AudioTrack.setVolume، setMediaVolumeLive→AudioManager.setStreamVolume) ✓، GuideLine ۶ لوپ ریلز ✓
+- LiveDub-Android: main پوش شد (5e6dbcb..795a9ee) + تگ v2.4.0 → remote بلافاصله حذف شد
+- LiveDub-Web: main پوش شد (6168190..9216934، شامل کامیت v2.4 صفحه دِلیوری + worklog) → remote حذف شد
+- CI تگ v2.4.0 (run 39444282398): SUCCESS در ~۲.۵ دقیقه؛ main (run 39444265891): SUCCESS ✓
+- Release v2.4.0 منتشر شد: LiveDub-v2.4.0-debug.apk (55.7MB) + release-unsigned (2.7MB) — تست دانلود مستقیم HTTP 200 با سایز کامل ✓
+
+Stage Summary:
+- github.com/erfankhani/LiveDub-Android/releases/latest ← همیشه آخرین APK (الان v2.4.0)
+- لینک مستقیم: /releases/download/v2.4.0/LiveDub-v2.4.0-debug.apk
+- هر ۳ درخواست کاربر تحویل شد: ① زیرنویس حذف شد ② دو اسلایدر زنده ③ لوپ = پخش تکراری ریلز (باگ کلاینت نبود؛ راهنما در اپ)
+- توکن سوم باید revoke شود — در چت لو رفته است

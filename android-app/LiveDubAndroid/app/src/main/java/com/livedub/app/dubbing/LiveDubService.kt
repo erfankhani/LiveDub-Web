@@ -114,12 +114,14 @@ class LiveDubService : Service() {
                 player?.setVolume(v)
                 getSharedPreferences("livedub", Context.MODE_PRIVATE)
                     .edit().putFloat("dubVolume", v).apply()
+                if (startedAt == 0L) stopSelf() // ⭐ v2.5: دوبله خاموش است → سرویس بیکار را نگاه ندار
                 return START_NOT_STICKY
             }
             // ⭐ v2.4: کنترل زنده «صدای اصلی» = ولوم استریم رسانه (همان ولومی که اپ مبدأ مثل یوتیوب پخش می‌کند)
             ACTION_SET_MEDIA_VOLUME -> {
                 val v = intent.getIntExtra(EXTRA_MEDIA_VOL, -1)
                 if (v >= 0) setMediaVolume(v)
+                if (startedAt == 0L) stopSelf() // ⭐ v2.5
                 return START_NOT_STICKY
             }
             else -> return START_NOT_STICKY

@@ -72,6 +72,7 @@ import com.livedub.app.ui.theme.Emerald
 import com.livedub.app.ui.theme.EmeraldLight
 import com.livedub.app.ui.theme.TextMuted
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 private val LANGS = listOf(
     "fa" to "فارسی", "en" to "انگلیسی", "tr" to "ترکی", "ar" to "عربی",
@@ -81,6 +82,9 @@ private val LANGS = listOf(
 
 private fun faNum(n: Int): String =
     n.toString().map { "۰۱۲۳۴۵۶۷۸۹"[Character.getNumericValue(it)] }.joinToString("")
+
+/** نسخهٔ اپ — هدر و فوتر هر دو از این می‌خوانند (دیگر جایی دستی عوض نمی‌شود) */
+private const val APP_VERSION = "v2.5"
 
 @Composable
 fun AppScreen(
@@ -95,11 +99,23 @@ fun AppScreen(
     var apiKey by remember { mutableStateOf(prefs.getString("apiKey", "") ?: "") }
     var showKey by remember { mutableStateOf(false) }
     var lang by remember { mutableStateOf(prefs.getString("targetLang", "fa") ?: "fa") }
-    var dubVol by remember { mutableStateOf((prefs.getFloat("dubVolume", 1.0f) * 100).toInt()) }
+    var dubVol by remember {
+        // ⭐ v2.5 فیکس ریشه‌ای: اسلایدر v2.4 محدودهٔ اشتباه 0..1 داشت و مقدار خراب (0 یا 0.01) ذخیره
+        // می‌کرد → گین ۱٪ = بی‌صدا! اگر مقدار ذخیره‌شده < ۵٪ است، همان باگ است → بازگردانی به ۱۰۰٪
+        val stored = prefs.getFloat("dubVolume", 1.0f)
+        val fixed = if (stored < 0.05f && !prefs.getBoolean("volFixV25", false)) {
+            prefs.edit().putFloat("dubVolume", 1.0f).putBoolean("volFixV25", true).apply()
+            1.0f
+        } else stored
+        mutableStateOf((fixed * 100).toInt())
+    }
     var voiceChannel by remember { mutableStateOf(prefs.getBoolean("voiceChannel", false)) }
     // ⭐ v2.4: ولوم رسانه (صدای اپ مبدأ) — زنده از AudioManager
     var mediaVol by remember { mutableStateOf(activity.mediaVolume().first) }
     val mediaVolMax = remember { activity.mediaVolume().second }
+    // ⭐ v2.5: محدودسازی نرخ ارسال اینتنت حین درگ (هر درگ ده‌ها فریم می‌سازد)
+    var lastDubSentAt by remember { mutableStateOf(0L) }
+    var lastMediaSentAt by remember { mutableStateOf(0L) }
     var langMenuOpen by remember { mutableStateOf(false) }
 
     var status by remember { mutableStateOf(getStatus()) }
@@ -256,10 +272,16 @@ fun AppScreen(
                     Slider(
                         value = dubVol.toFloat(),
                         onValueChange = {
-                            dubVol = it.toInt()
+                            dubVol = it.roundToInt().coerceIn(0, 100)
                             persist()
-                            activity.setDubVolumeLive(dubVol / 100f) // ⭐ زنده
+                            val now = System.currentTimeMillis()
+                            if (now - lastDubSentAt > 80) { // ⭐ زنده (با محدودسازی نرخ)
+                                lastDubSentAt = now
+                                activity.setDubVolumeLive(dubVol / 100f)
+                            }
                         },
+                        onValueChangeFinished = { activity.setDubVolumeLive(dubVol / 100f) }, // مقدار نهایی تضمین می‌شود
+                        valueRange = 0f..100f, // ⭐⭐ v2.5 فیکس اصلی: قبلاً محدودهٔ پیش‌فرض 0..1 بود → دوبله بی‌صدا!
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
                             activeTrackColor = Emerald,
@@ -283,8 +305,13 @@ fun AppScreen(
                         value = mediaVol.toFloat(),
                         onValueChange = {
                             mediaVol = it.toInt()
-                            activity.setMediaVolumeLive(mediaVol) // ⭐ زنده — روی اپ مبدأ اعمال می‌شود
+                            val now = System.currentTimeMillis()
+                            if (now - lastMediaSentAt > 80) {
+                                lastMediaSentAt = now
+                                activity.setMediaVolumeLive(mediaVol) // ⭐ زنده — روی اپ مبدأ اعمال می‌شود
+                            }
                         },
+                        onValueChangeFinished = { activity.setMediaVolumeLive(mediaVol) },
                         valueRange = 0f..mediaVolMax.toFloat(),
                         steps = (mediaVolMax - 1).coerceAtLeast(0),
                         colors = SliderDefaults.colors(
@@ -454,14 +481,14 @@ fun AppScreen(
                     GuideLine("۲. به هر اپی بروید (یوتیوب، تلگرام، مرورگر و…) و ویدیو پخش کنید")
                     GuideLine("۳. دوبله فارسی از روی صدای همان اپ پخش می‌شود — حتی در پس‌زمینه با صفحه خاموش")
                     GuideLine("۴. سشن هر ~۱۳ دقیقه به‌صورت خودکار تمدید می‌شود؛ دیگر هیچ‌وقت قطع نمی‌شود")
-                    GuideLine("۵. دو اسلایدر «صدای دوبله» و «صدای اصلی» را حین دوبله زنده تنظیم کنید — برای استقلال کامل، کانال مکالمه را روشن کنید")
+                    GuideLine("۵. اسلایدر «صدای دوبله» (۰ تا ۱۰۰٪) را حین دوبله زنده بالا ببرید — اگر صدا نمی‌آید اول همین را چک کنید")
                     GuideLine("۶. اگر ویدیو شما ریلز/شورت با پخش خودکارِ تکراری است، دوبله هم همان بخش را تکرار می‌کند — با یک ویدیوی بلند (مثلاً یوتیوب ۱۰ دقیقه‌ای) تست کنید")
                 }
             }
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "LiveDub v2.4 · دوبله زنده با Gemini Live Translate",
+                "LiveDub $APP_VERSION · دوبله زنده با Gemini Live Translate",
                 fontSize = 10.sp, color = TextMuted,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
@@ -492,7 +519,7 @@ private fun Header(running: Boolean, state: String) {
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text("LiveDub", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFE8EFEC))
-            Text("دوبله زنده با Gemini · v2.3", fontSize = 11.sp, color = TextMuted)
+            Text("دوبله زنده با Gemini · $APP_VERSION", fontSize = 11.sp, color = TextMuted)
         }
         Surface(
             shape = RoundedCornerShape(99.dp),
